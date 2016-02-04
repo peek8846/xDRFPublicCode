@@ -171,23 +171,23 @@ namespace {
                 }
             } else {
                 //Start analysis of the function
-                vector<State> toReturn = delimitFromBlock(&(start->getEntryBlock()),states);
-                //TODO: Make delimitFromBlock return the first synch variables found
-                //on each branch
-                SmallPtrSet<SynchronizationPoint*, 1> dummy;
-                delimitFunctionDynamic[start]=make_pair(toReturn,dummy);
+                SmallPtrSet<SynchronizationPoint*, 1> firstReachable;
+                vector<State> toReturn = delimitFromBlock(&(start->getEntryBlock()),states,&firstReachable);
+                delimitFunctionDynamic[start]=make_pair(toReturn,firstReachable);
             }
             return delimitFunctionDynamic[start].first;
         }
 
         //Delimits synchronization points starting with the specified block
-        //Input: Block to start at and The state before analyzing
+        //Input: Block to start at and The state before analyzing, as well
+        //as the set to store the first encountered synch points in
+        //(if null, they are not stored)
         //Returns: A set of states, one for each end point of the search
         //Side-effects: Updates the synchronization point variables
         //with the paths discoverable from this basic block
-        vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states) {
+        vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states,
+                                       SmallPtrSet<SynchronizationPoint*,1> *firstReachable) {
             //TODO: Handle loops that do not cotnain synch points
-            //TODO: Return the first synch point encountered
             DEBUG_PRINT("Started a new search branch from BasicBlock: "<< curr << "\n");
 
             //This is the set of states of sub-branches that we need to keep
@@ -213,6 +213,13 @@ namespace {
                             synchPoint = new SynchronizationPoint;
                             synchPoint->val=currb;
                         }
+                        //Toss the synchpoint upwards if we should
+                        if (firstReachable) {
+                            //Only do this once, we only need to pass
+                            //the first synchpoints we encounter
+                            firstReachable->insert(synchPoint);
+                            firstReachable=NULL;
+                        }
                         //Perform updates
                         for (State state : states) {
                             updateSynchPointWithState(state,synchPoint);
@@ -225,7 +232,7 @@ namespace {
                         if (visited) {
                             //Return nothing, everything is already handled
                             //by previous searches
-                            return vector<state>();
+                            return vector<State>();
                         } else {
                             //Start a new path
                             State newState;
@@ -244,6 +251,19 @@ namespace {
                                 //that are at the exit of the function
                                 DEBUG_PRINT("Analysing CG of " << calledFun->getName() << "\n");
                                 states = delimitFunction(calledFun,states);
+
+                                //This is kinda-sorta hacky, but if we have
+                                //not yet discovered any synch-points we can
+                                //take all of the first-encountered synchpoints
+                                //in the called function and say we can
+                                //encounter them first here, too
+                                if (firstReachable) {
+                                    SmallPtrSet<SynchronizationPoint*,1> firstEnc = delimitFunctionDynamic[calledFun].second;
+                                    if (!firstReachable->empty()) {
+                                        firstReachable->insert(firstEnc.begin(),firstEnc.end());
+                                        firstReachable=NULL;
+                                    }
+                                }
                                 //Continue analysis as usual with those states
                             } else {
                                 //We failed to determine which function could
@@ -279,7 +299,9 @@ namespace {
                         else {
                             //Perform a new function call on the branch, obtaining
                             //the resulting state
-                            vector<State> resultStates = delimitFromBlock(*bb,states);
+                            //Remember if the branches need to track first reached
+                            //synch points
+                            vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable);
                             finishedSearchStates.insert(finishedSearchStates.end(),
                                                         resultStates.begin(),resultStates.end());
                         }
