@@ -30,6 +30,14 @@ public:
 //A point of synchronization in the program
 class SynchronizationPoint {
 public:
+  SynchronizationPoint() {
+    static int IDcount=0;
+    ID = IDcount++;
+  }
+
+  //ID useful for debugging
+  int ID;
+
   Instruction *val; //The corresponding instruction
   //The synchronization points that reach this without passing
   //over other synch points

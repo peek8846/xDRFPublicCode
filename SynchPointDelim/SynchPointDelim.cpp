@@ -30,7 +30,7 @@
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-// #include "llvm/IR/Constants.h"
+#include "llvm/IR/Constants.h"
 // #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
@@ -68,11 +68,11 @@
 
 //Define moderately pretty printing functions
 #define PRINTSTREAM errs()
-#define PRINT_VERBOSE PRINTSTREAM << "SynchPointDelim: "
+#define PRINT PRINTSTREAM << "SynchPointDelim: "
 #define PRINT_DEBUG PRINTSTREAM << "SynchPointDelim (debug): "
 
 //Verbose prints things like progress
-#define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("verbose",PRINT_VERBOSE << X)
+#define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("verbose",PRINT << X)
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
@@ -81,7 +81,12 @@ using namespace std;
 
 namespace {
     //These are the functions to treat as synchronization points
-    set<StringRef> synchFunctions = {};
+    set<StringRef> synchFunctions = {"pthread_mutex_lock",
+                                     "pthread_mutex_unlock"};
+
+    //These are the function to treat as if they spawn new
+    //threads
+    set<StringRef> threadFunctions = {"pthread_create"};
 
     struct SynchPointDelim : public ModulePass {
         static char ID;
@@ -98,15 +103,42 @@ namespace {
             //Here we would "require" the previous AA pass
         }
 
-        //Assume input module is inlined as far as possible
-        //
-
         //The main runOnModule function is divided in two parts
         //The first part finds synchronization points and the drf paths between
         //them
         //The second part determines which synchronization points synch with
         //eachother, and finds data conflicts across synchronizations points
         virtual bool runOnModule(Module &M) {
+            //Functions that may be the entry point of functions
+            SmallPtrSet<Function*,4> entrypoints;
+            
+            //Find the "main" function
+            Function *main = M.getFunction("main");
+            if (!main) {
+                PRINT << "No 'main' function detected, considering manually inputing the entry function\n";
+                PRINT << "Exiting\n";
+                assert(!"Did not detect main function");  
+            }
+            entrypoints.insert(main);
+
+            //Find other functions to analyze
+            findEntryPoints(M,entrypoints);
+
+            for (Function *target : entrypoints) {
+                //Start a delimitation of each targeted function with a dummy state,
+                //starting from a NULL synch point
+                State dummyState;
+                dummyState.lastSynch=NULL;
+                vector<State> startingDummyStates;
+                startingDummyStates.push_back(dummyState);
+                vector<State> endingPoints;
+                endingPoints = delimitFunction(target,startingDummyStates);
+                for (State state : endingPoints) {
+                    updateSynchPointWithState(state,NULL);
+                }
+            }
+            //Print the info
+            printInfo();
             
             return false; //Pure analysis, should not change any code
         }
@@ -129,14 +161,6 @@ namespace {
             SynchronizationPoint* lastSynch;
             SmallPtrSet<Instruction*,32> precedingInstructions;
         };
-
-        //Top-level delimitation for a function, should commonly only be
-        //called on main
-        //Disregards synchronization until the point that a thread has been
-        //created
-        void topLevelDelimitForFunction(Function *functionStart) {
-            
-        }
 
         //This is a dynamic-programming style map from functions
         //to pairs of vector of states and sets of sync points that lets
@@ -178,22 +202,35 @@ namespace {
             return delimitFunctionDynamic[start].first;
         }
 
+        vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states,
+                                       SmallPtrSet<SynchronizationPoint*,1> *firstReachable) {
+            return delimitFromBlock(curr,states,firstReachable,NULL);
+        }        
+
         //Delimits synchronization points starting with the specified block
         //Input: Block to start at and The state before analyzing, as well
         //as the set to store the first encountered synch points in
-        //(if null, they are not stored)
+        //(if null, they are not stored). Also takes the block this search
+        //branched from, if any
         //Returns: A set of states, one for each end point of the search
         //Side-effects: Updates the synchronization point variables
         //with the paths discoverable from this basic block
         vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states,
-                                       SmallPtrSet<SynchronizationPoint*,1> *firstReachable) {
-            //TODO: Handle loops that do not cotnain synch points
-            DEBUG_PRINT("Started a new search branch from BasicBlock: "<< curr << "\n");
+                                       SmallPtrSet<SynchronizationPoint*,1> *firstReachable,
+                                       BasicBlock *prev) {
+            DEBUG_PRINT("Started a new search branch from BasicBlock: "<< curr->getName() << "\n");
 
             //This is the set of states of sub-branches that we need to keep
             //track of. These will be returned together with the states
             //obtained in the current search once we return
             vector<State> finishedSearchStates;
+            
+            //This is the set of edges (basicblock to basicblock) that we should
+            //ignore while branching. Basically we never want to follow the same
+            //edge twice while analyzing.
+            set<pair<BasicBlock*,BasicBlock*> > forbiddenEdges;
+            if (prev)
+                forbiddenEdges.insert(make_pair(prev,curr));
 
             while (curr) {
                 //Analyze the current block
@@ -203,7 +240,7 @@ namespace {
                     if (isSynch(currb)) {
                         //Handle synchronization point
                         //See if we've already visited this point
-                        DEBUG_PRINT("Visited instruction that is synch point: " << currb << "\n");
+                        DEBUG_PRINT("Visited instruction that is synch point: " << *currb << "\n");
                         SynchronizationPoint *synchPoint = findSynchPoint(synchronizationPoints,currb);
                         bool visited = true;
                         if (!synchPoint) {
@@ -212,6 +249,7 @@ namespace {
                             //If not, create a new synchronization point
                             synchPoint = new SynchronizationPoint;
                             synchPoint->val=currb;
+                            synchronizationPoints.insert(synchPoint);
                         }
                         //Toss the synchpoint upwards if we should
                         if (firstReachable) {
@@ -221,7 +259,7 @@ namespace {
                             firstReachable=NULL;
                         }
                         //Perform updates
-                        for (State state : states) {
+                        for (State &state : states) {
                             updateSynchPointWithState(state,synchPoint);
                         }
                         //Clear previous states, all searched paths end here
@@ -247,63 +285,92 @@ namespace {
                             //struct accesses
                             Function *calledFun = dyn_cast<CallInst>(currb)->getCalledFunction();
                             if (calledFun) {
-                                //Parse the function and obtain the states
-                                //that are at the exit of the function
-                                DEBUG_PRINT("Analysing CG of " << calledFun->getName() << "\n");
-                                states = delimitFunction(calledFun,states);
-
-                                //This is kinda-sorta hacky, but if we have
-                                //not yet discovered any synch-points we can
-                                //take all of the first-encountered synchpoints
-                                //in the called function and say we can
-                                //encounter them first here, too
-                                if (firstReachable) {
-                                    SmallPtrSet<SynchronizationPoint*,1> firstEnc = delimitFunctionDynamic[calledFun].second;
-                                    if (!firstReachable->empty()) {
-                                        firstReachable->insert(firstEnc.begin(),firstEnc.end());
-                                        firstReachable=NULL;
+                                if (!calledFun->empty()) {
+                                    //Parse the function and obtain the states
+                                    //that are at the exit of the function
+                                    DEBUG_PRINT("Analysing CG of " << calledFun->getName() << "\n");
+                                    states = delimitFunction(calledFun,states);
+                                    
+                                    //This is kinda-sorta hacky, but if we have
+                                    //not yet discovered any synch-points we can
+                                    //take all of the first-encountered synchpoints
+                                    //in the called function and say we can
+                                    //encounter them first here, too
+                                    if (firstReachable) {
+                                        SmallPtrSet<SynchronizationPoint*,1> firstEnc = delimitFunctionDynamic[calledFun].second;
+                                        if (!firstReachable->empty()) {
+                                            firstReachable->insert(firstEnc.begin(),firstEnc.end());
+                                            firstReachable=NULL;
+                                        }
                                     }
+                                } else {
+                                    DEBUG_PRINT("Skipped analysis of " << calledFun->getName() << " due to it having no function body\n");
                                 }
                                 //Continue analysis as usual with those states
                             } else {
                                 //We failed to determine which function could
                                 //be called, print an error about this
-                                VERBOSE_PRINT("Failed to determine the function called by: " << currb << ", ignoring the error\n");
+                                VERBOSE_PRINT("Failed to determine the function called by: " << *currb << ", ignoring the error\n");
                             }
                         }
                         else {
                             //Otherwise, simply add the instruction to the
                             //states we're tracking
-                            for (State state : states)
+                            DEBUG_PRINT("Added " << *currb << " to:\n");
+                            for (State &state : states) {
+                                if (state.lastSynch)
+                                    DEBUG_PRINT("ID " << state.lastSynch->ID << "\n");
+                                else
+                                    DEBUG_PRINT("Context start\n");
                                 state.precedingInstructions.insert(currb);
+                            }
                         }
                     }
                 }
                 //After we're done with the current block, handle successor
-                //blocks
+                //blocks. But frst we set up the ending iterator to point to
+                //the block after the last block whose edge is not forbidden
                 succ_iterator
                     bb = succ_begin(curr),
-                    be = succ_end(curr);
-                //Handle case where basicblock has no successors
+                    be = succ_begin(curr),
+                    bbe = succ_end(curr);
+
+                DEBUG_PRINT("Finding branches from " << curr->getName() << "\n");
+                //Set be to be the last basicblock to which the edge is not
+                //forbidden
+                while (bb != bbe) {
+                    if (forbiddenEdges.count(make_pair(curr,*bb)) == 0) {
+                        be=bb++;
+                    }
+                }
+                bb = succ_begin(curr);
+                
+                //Handle case where basicblock has no legal successors
                 if (bb == be) {
-                    DEBUG_PRINT("DFS path ended in BasicBlock: " << curr << "\n");
+                    DEBUG_PRINT("DFS path ended in BasicBlock: " << curr->getName() << " due to no viable branches\n");
                     curr = NULL;
                 }
-                //Handle successors
+                //Handle successors, ignore successors that are forbidden to
+                //branch on
                 else {
+                    DEBUG_PRINT("Last viable branch was: " << (*be)->getName() << "\n");
                     //Let current function call handle the last
-                    //successor
+                    //successor that can be branched on
                     while (bb != be) {
-                        if (bb+1 == be)
+                        if (bb+1 == be) {
+                            forbiddenEdges.insert(make_pair(curr,*bb));
                             curr=*bb;
+                        }
                         else {
                             //Perform a new function call on the branch, obtaining
                             //the resulting state
                             //Remember if the branches need to track first reached
                             //synch points
-                            vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable);
-                            finishedSearchStates.insert(finishedSearchStates.end(),
-                                                        resultStates.begin(),resultStates.end());
+                            if (forbiddenEdges.count(make_pair(curr,*bb)) == 0) {
+                                vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable,curr);
+                                finishedSearchStates.insert(finishedSearchStates.end(),
+                                                            resultStates.begin(),resultStates.end());
+                            }
                         }
                         ++bb;
                     }
@@ -312,6 +379,40 @@ namespace {
             finishedSearchStates.insert(finishedSearchStates.end(),
                                         states.begin(),states.end());
             return finishedSearchStates;
+        }
+
+        //Print information about synch points and synch variables
+        void printInfo() {
+            VERBOSE_PRINT("Printing synchronization point info...\n");
+            //Print info about synch points
+            for (SynchronizationPoint* synchPoint : synchronizationPoints) {
+                VERBOSE_PRINT("Synch Point: " << synchPoint->ID << "\n");
+                VERBOSE_PRINT("Value: " << *(synchPoint->val) << "\n");
+                VERBOSE_PRINT("Preceding:\n");
+                for (SynchronizationPoint* precedingPoint : synchPoint->preceding) {
+                    if (precedingPoint) {
+                        VERBOSE_PRINT("ID: " << precedingPoint->ID << "\n");
+                    } else {
+                        VERBOSE_PRINT("Context start\n");
+                    }
+                    for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
+                             et=synchPoint->precedingInsts[precedingPoint].end();
+                         it != et; ++it)
+                        VERBOSE_PRINT(**it << "\n");
+                }
+                VERBOSE_PRINT("Following:\n");
+                for (SynchronizationPoint* followingPoint : synchPoint->following) {
+                    if (followingPoint) {
+                        VERBOSE_PRINT("ID: " << followingPoint->ID << "\n");
+                    } else {
+                        VERBOSE_PRINT("Context end\n");
+                    }
+                    for (auto it=synchPoint->followingInsts[followingPoint].begin(),
+                             et=synchPoint->followingInsts[followingPoint].end();
+                         it != et; ++it)
+                        VERBOSE_PRINT(**it << "\n");
+                }
+            }
         }
 
         //Utility: Returns true if an instruction is a synchronization point
@@ -340,12 +441,69 @@ namespace {
         //Utility: Given a synch point and a state, updates both as if the
         //state leads to the synch point
         void updateSynchPointWithState(State state,SynchronizationPoint *synchPoint) {
-            state.lastSynch->following.insert(synchPoint);
-            state.lastSynch->followingInsts[synchPoint].insert(state.precedingInstructions.begin(),
+            if (state.lastSynch != NULL) {
+                DEBUG_PRINT("Updating following instructions of syncpoint " << state.lastSynch->ID << "\n");
+                DEBUG_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
+                state.lastSynch->following.insert(synchPoint);
+                state.lastSynch->followingInsts[synchPoint].insert(state.precedingInstructions.begin(),
+                                                                   state.precedingInstructions.end());
+            }
+            if (synchPoint) {
+                DEBUG_PRINT("Updating preceding instructions of syncpoint " << synchPoint->ID << "\n");
+                DEBUG_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
+                synchPoint->preceding.insert(state.lastSynch);
+                synchPoint->precedingInsts[state.lastSynch].insert(state.precedingInstructions.begin(),
                                                                state.precedingInstructions.end());
-            synchPoint->preceding.insert(state.lastSynch);
-            synchPoint->precedingInsts[state.lastSynch].insert(state.precedingInstructions.begin(),
-                                                               state.precedingInstructions.end());
+            }
+        }
+
+        //Finds the functions that may be the entry points of threads
+        //INPUT: The module to analyze and the set into which to insert
+        //the results
+        void findEntryPoints(Module &M, SmallPtrSet<Function*,4> &targetFunctions) {
+            //For each function that can spawn new threads, find the calls to that function
+            for (StringRef funName : threadFunctions) {
+                VERBOSE_PRINT("Finding functions used by " << funName << "\n");
+                Function *fun = M.getFunction(funName);
+                if (!fun) {
+                    VERBOSE_PRINT("was not used by module\n");
+                } else {
+                    for (auto call = fun->users().begin(); call != fun->users().end(); ++call) {
+                        DEBUG_PRINT("Examining use: " << **call << "\n");
+                        if (CallInst *callsite = dyn_cast<CallInst>(*call)) {
+                            for (int opnum = 0; opnum < callsite->getNumArgOperands(); ++opnum) {
+                                Value *funcOp = callsite->getArgOperand(opnum);
+                                DEBUG_PRINT("Examining argument: " << *funcOp << "\n");
+                                //Try to resolve the value into a proper function
+                                while (!isa<Function>(funcOp)) {
+                                    if (isa<ConstantExpr>(funcOp)) {
+                                        ConstantExpr *constOp = dyn_cast<ConstantExpr>(funcOp);
+                                        if (constOp->isCast()) {
+                                            funcOp = constOp->getAsInstruction();
+                                            CastInst *castOp = dyn_cast<CastInst>(funcOp);
+                                            Value* tempOp = funcOp;
+                                            funcOp = castOp->getOperand(0);
+                                            delete(tempOp);
+                                        }
+                                    } else if (isa<CastInst>(funcOp)) {
+                                        CastInst *castOp = dyn_cast<CastInst>(funcOp);
+                                        funcOp = castOp->getOperand(0);
+                                    }
+                                    else { //Unable To Resolve
+                                        DEBUG_PRINT("Failed to resolve argument " << *funcOp
+                                                    << " to a function, remaining type is:" << typeid(*funcOp).name() << "\n");
+                                        break;
+                                    }
+                                }
+                                if (auto spawnFunc = dyn_cast<Function>(funcOp)) {
+                                    VERBOSE_PRINT("Targeting function: " << spawnFunc->getName() << "\n");
+                                    targetFunctions.insert(spawnFunc);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     };
 }
