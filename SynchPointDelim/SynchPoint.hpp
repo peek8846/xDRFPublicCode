@@ -20,11 +20,21 @@ class SynchronizationPoint;
 //A collection of synchronization points
 class SynchronizationVariable {
 public:
+  SynchronizationVariable() {
+    static int IDCount = 0;
+    ID = IDCount++;
+  }
+
+  //Usefull for debugging
+  int ID;
+
   //The constituent synchronization points
   SmallPtrSet<SynchronizationPoint*,8> synchronizationPoints;
   //The pairs of data conflicts (before, after) detected for this synchronization
   //variable
   set<pair<Instruction*,Instruction*> > conflicts;
+
+  void merge(SynchronizationVariable *other);
 };
 
 //A point of synchronization in the program
@@ -38,7 +48,12 @@ public:
   //ID useful for debugging
   int ID;
 
-  Instruction *val; //The corresponding instruction
+  //The corresponding instruction
+  Instruction *val;
+
+  //What argument of the instruction is the memorylocation of synchronization
+  int op=-1; //-1 Means that all arguments should be searched
+
   //The synchronization points that reach this without passing
   //over other synch points
   SmallPtrSet<SynchronizationPoint*,2> preceding;
@@ -52,7 +67,7 @@ public:
   //that can be executed on the path leading there
   map<SynchronizationPoint*,SmallPtrSet<Instruction*,16> > followingInsts;
   //The synchronization variable this is part of (if any)
-  SynchronizationVariable *synchVar;
+  SynchronizationVariable *synchVar=NULL;
 
   //Returns a SmallPtrSet containing all points associated with this
   //point, including itself
@@ -85,3 +100,9 @@ public:
   }
 };
 
+void SynchronizationVariable::merge(SynchronizationVariable *other) {
+  for (SynchronizationPoint *synchPoint : other->synchronizationPoints) {
+    synchPoint->setSynchronizationVariable(this);
+  }
+  conflicts.insert(other->conflicts.begin(),other->conflicts.end());
+}

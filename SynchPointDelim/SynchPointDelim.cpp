@@ -103,11 +103,12 @@ namespace {
             //Here we would "require" the previous AA pass
         }
 
-        //The main runOnModule function is divided in two parts
+        //The main runOnModule function is divided in three parts
         //The first part finds synchronization points and the drf paths between
         //them
         //The second part determines which synchronization points synch with
-        //eachother, and finds data conflicts across synchronizations points
+        //eachother
+        //The third part finds data conflicts across synchronizations points
         virtual bool runOnModule(Module &M) {
             //Functions that may be the entry point of functions
             SmallPtrSet<Function*,4> entrypoints;
@@ -124,6 +125,7 @@ namespace {
             //Find other functions to analyze
             findEntryPoints(M,entrypoints);
 
+            //Analyze each entry point
             for (Function *target : entrypoints) {
                 //Start a delimitation of each targeted function with a dummy state,
                 //starting from a NULL synch point
@@ -137,6 +139,10 @@ namespace {
                     updateSynchPointWithState(state,NULL);
                 }
             }
+
+            //Determine what synchronization variables we have
+            determineSynchronizationVariables();
+
             //Print the info
             printInfo();
             
@@ -413,6 +419,18 @@ namespace {
                         VERBOSE_PRINT(**it << "\n");
                 }
             }
+            VERBOSE_PRINT("Printing synchronization variable info...\n");
+            for (SynchronizationVariable *synchVar : synchronizationVariables) {
+                VERBOSE_PRINT("Synch VAR: " << synchVar->ID << "\n");
+                VERBOSE_PRINT("Contains: (ID|VALUE)\n");
+                for (SynchronizationPoint *synchPoint : synchVar->synchronizationPoints) {
+                    VERBOSE_PRINT(synchPoint->ID << " ; " << *(synchPoint->val) << "\n");
+                }
+                VERBOSE_PRINT("Data conflicts (FROM|TO):\n");
+                for (pair<Instruction*,Instruction*> conflict : synchVar->conflicts) {
+                    VERBOSE_PRINT(*(conflict.first) << " ; " << *(conflict.second) << "\n");
+                }
+            }            
         }
 
         //Utility: Returns true if an instruction is a synchronization point
@@ -504,6 +522,62 @@ namespace {
                     }
                 }
             }
+        }
+
+        //Determine whether two values refer to the same memory location
+        bool alias(Value *val1, Value* val2) {
+            return false; //Dummy for now
+        }
+
+        //Utility: Determines whether a SynchronizationPoint should be
+        //in an synchronizationVariable
+        bool aliasWithSynchVar(SynchronizationPoint* synchPoint,SynchronizationVariable* synchVar) {
+            SmallPtrSet<Value*,1> synchPoint1op;
+            if (synchPoint->op != -1)
+                synchPoint1op.insert(synchPoint->val->getOperand(synchPoint->op));
+            else
+                for (int i = 0; i < synchPoint->val->getNumOperands(); ++i)
+                    synchPoint1op.insert(synchPoint->val->getOperand(i));
+            for (SynchronizationPoint *synchPoint2 : synchVar->synchronizationPoints) {
+                for (Value* val : synchPoint1op) {
+                    if (synchPoint2->op != -1) {
+                        if (alias(val,synchPoint2->val->getOperand(synchPoint2->op)))
+                            return true;
+                    }
+                    else
+                        for (int i = 0; i < synchPoint2->val->getNumOperands(); ++i)
+                            if (alias(val,synchPoint2->val->getOperand(i)))
+                                return true;
+                }
+            }
+            return false;
+        }
+
+        //Sets up the synchronizationVariables structure
+        void determineSynchronizationVariables() {
+            DEBUG_PRINT("Determining synchronization variables...\n");
+            for (SynchronizationPoint *synchPoint : synchronizationPoints) {
+                DEBUG_PRINT("Placing synchPoint " << synchPoint->ID << "\n");
+                for (SynchronizationVariable *synchVar : synchronizationVariables) {
+                    if (aliasWithSynchVar(synchPoint,synchVar)) {
+                        if (synchPoint->synchVar == NULL) {
+                            DEBUG_PRINT("Was placed into synchVar " << synchVar->ID << "\n");
+                            synchPoint->setSynchronizationVariable(synchVar);
+                        } else {
+                            DEBUG_PRINT("Merged other synchVar " << synchVar->ID
+                                        << " into synchVar " << synchPoint->synchVar->ID << " due to multiple aliasing\n");
+                            synchPoint->synchVar->merge(synchVar);
+                            delete(synchVar);
+                        }
+                    }
+                }
+                if (synchPoint->synchVar == NULL) {
+                    DEBUG_PRINT("Was not placed into any synchVar, creating new synchVar\n");
+                    SynchronizationVariable *newSynchVar = new SynchronizationVariable;
+                    synchPoint->setSynchronizationVariable(newSynchVar);
+                    synchronizationVariables.insert(newSynchVar);
+                }
+            }            
         }
     };
 }
