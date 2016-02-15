@@ -63,6 +63,7 @@
 #include "llvm/Pass.h"
 
 #include "SynchPoint.hpp"
+#include "UseChainAliasing.cpp"
 
 #define LIBRARYNAME "SynchPointDelim"
 
@@ -103,6 +104,8 @@ namespace {
             //Here we would "require" the previous AA pass
         }
 
+        Module *wM;
+
         //The main runOnModule function is divided in three parts
         //The first part finds synchronization points and the drf paths between
         //them
@@ -112,6 +115,8 @@ namespace {
         virtual bool runOnModule(Module &M) {
             //Functions that may be the entry point of functions
             SmallPtrSet<Function*,4> entrypoints;
+
+            wM=&M;
             
             //Find the "main" function
             Function *main = M.getFunction("main");
@@ -168,50 +173,108 @@ namespace {
             SmallPtrSet<Instruction*,32> precedingInstructions;
         };
 
-        //This is a dynamic-programming style map from functions
-        //to pairs of vector of states and sets of sync points that lets
-        //us avoid analyzing the same function twice
-        //The first part of the pair bound to each function is the resulting
-        //states after analyzing it
-        //The second part of the pair bound to each function is the
-        //collection of synch points that need to have their preceding
-        //sets updated according to the new calling context
-        map<Function*,pair<vector<State>,
-                           SmallPtrSet<SynchronizationPoint*, 1> >
-            > delimitFunctionDynamic; 
+        class FunctionAnalysisState {
+        public:
+            enum AnalysisState {Analyzed, BeingAnalyzed};
+            AnalysisState astate = BeingAnalyzed;
+            vector<State> trailingStates;
+            vector<State> leadingReverseStates;
+        };
+
+        //This is a map that keeps track of the analysis state of each function
+        //and additionally how they should be handled
+        //Functions are either:
+        //Fully analyzed, divided into two categories: contains synchs and
+        //does not contain synchs
+        //Not analyzed, equivalent with not being mapped
+        //Being analyzed, this will be encountered when there is mutual
+        //recursion
+        // map<Function*,pair<vector<State>,
+        //                    SmallPtrSet<SynchronizationPoint*, 1> >
+        //     > delimitFunctionDynamic; 
+        map<Function*,FunctionAnalysisState> delimitFunctionDynamic; 
+
+        
+        //
 
         //Delimits synchronization points for a particular function
-        //Input: Function to analyze and the states to track before analysing
+        //Input: Function to analyze and the states to track before analysing,
+        // also the set of function calls that should not be analyzed
         //Returns: A set of set of states, one state for each exit point
         //and each path to reach that exit point
         //Side-effects: Updates all the synchronization points within the
         //function correctly
         vector<State> delimitFunction(Function *start,vector<State> states) {
+            SmallPtrSet<CallInst*,2> noRecurseSet;
+            return delimitFunction(start,states,noRecurseSet,NULL);
+        }
+
+        vector<State> delimitFunction(Function *start,vector<State> states, SmallPtrSet<CallInst*,2> &noRecurseSet, CallInst* callInst) {
             DEBUG_PRINT("Starting analysis of function: " << start->getName() << "\n");
             //Check if we have handled this function previously
-            if (delimitFunctionDynamic.count(start) != 0) {
+            if (delimitFunctionDynamic.count(start) != 0 &&
+                delimitFunctionDynamic[start].astate == FunctionAnalysisState::Analyzed) {
                 DEBUG_PRINT("Previously handled - dynamic resolution\n");
-                //Update the synch points that are accessible from the
-                //entry of the function such that their preceding paths
-                //contain the current preceding paths
-                for (SynchronizationPoint *point : delimitFunctionDynamic[start].second) {
+            } else {
+                if (delimitFunctionDynamic[start].astate == FunctionAnalysisState::BeingAnalyzed) {
+                    DEBUG_PRINT("Encountered recursion - added to no-recurse set\n");
+                    noRecurseSet.insert(callInst);
+                }
+                
+                //Start analysis of the function
+                FunctionAnalysisState funState;
+                funState.astate = FunctionAnalysisState::BeingAnalyzed;
+                delimitFunctionDynamic[start]=funState;
+                State dummyState;
+                dummyState.lastSynch = NULL;
+                vector<State> dummyVector;
+                dummyVector.push_back(dummyState);
+                vector<State> trailStates = delimitFromBlock(&(start->getEntryBlock()),dummyVector,
+                                                             &(delimitFunctionDynamic[start].leadingReverseStates),
+                                                             noRecurseSet);
+                delimitFunctionDynamic[start].astate = FunctionAnalysisState::Analyzed;
+                delimitFunctionDynamic[start].trailingStates.insert(delimitFunctionDynamic[start].trailingStates.begin(),
+                                                                    trailStates.begin(),
+                                                                    trailStates.end());
+            }
+
+            vector<State> toReturn;
+            //Update the synch points that are accessible from the
+            //entry of the function such that their preceding paths
+            //contain the current preceding paths
+            DEBUG_PRINT("Function analysis done, updating states and synch points\n");
+            for (State leadState : delimitFunctionDynamic[start].leadingReverseStates) {
+                for (State state : states) {
+                    state.precedingInstructions.insert(leadState.precedingInstructions.begin(),
+                                                       leadState.precedingInstructions.end());
+                    updateSynchPointWithState(state,leadState.lastSynch);
+                }
+            }
+            //Return the states that trail from the function
+            for (State trailState : delimitFunctionDynamic[start].trailingStates) {
+                if (trailState.lastSynch != NULL)
+                    toReturn.push_back(trailState);
+                else {
+                    //Edge case, there is no synch point on this path through the
+                    //function, we need to add the instructions encountered
+                    //to the preceding states
+                    //and return accordingly
                     for (State state : states) {
-                        updateSynchPointWithState(state,point);
+                        state.precedingInstructions.insert(trailState.precedingInstructions.begin(),
+                                                           trailState.precedingInstructions.end());
+                        toReturn.push_back(state);
                     }
                 }
-            } else {
-                //Start analysis of the function
-                SmallPtrSet<SynchronizationPoint*, 1> firstReachable;
-                vector<State> toReturn = delimitFromBlock(&(start->getEntryBlock()),states,&firstReachable);
-                delimitFunctionDynamic[start]=make_pair(toReturn,firstReachable);
             }
-            return delimitFunctionDynamic[start].first;
+
+            return toReturn;
         }
 
         vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states,
-                                       SmallPtrSet<SynchronizationPoint*,1> *firstReachable) {
-            return delimitFromBlock(curr,states,firstReachable,NULL);
-        }        
+                                       vector<State> *firstReachable,
+                                       SmallPtrSet<CallInst*,2> noRecurseSet) {
+            return delimitFromBlock(curr,states,firstReachable,noRecurseSet,NULL);
+        }
 
         //Delimits synchronization points starting with the specified block
         //Input: Block to start at and The state before analyzing, as well
@@ -222,7 +285,8 @@ namespace {
         //Side-effects: Updates the synchronization point variables
         //with the paths discoverable from this basic block
         vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states,
-                                       SmallPtrSet<SynchronizationPoint*,1> *firstReachable,
+                                       vector<State> *firstReachable,
+                                       SmallPtrSet<CallInst*,2> &noRecurseSet,
                                        BasicBlock *prev) {
             DEBUG_PRINT("Started a new search branch from BasicBlock: "<< curr->getName() << "\n");
 
@@ -261,7 +325,15 @@ namespace {
                         if (firstReachable) {
                             //Only do this once, we only need to pass
                             //the first synchpoints we encounter
-                            firstReachable->insert(synchPoint);
+                            State newState;
+                            newState.lastSynch = synchPoint;
+                            //We might have several states, but we should only
+                            //have a single synchPoint
+                            for (State state : states) {
+                                newState.precedingInstructions.insert(state.precedingInstructions.begin(),
+                                                                      state.precedingInstructions.end());
+                            }
+                            firstReachable->push_back(newState);
                             firstReachable=NULL;
                         }
                         //Perform updates
@@ -291,11 +363,16 @@ namespace {
                             //struct accesses
                             Function *calledFun = dyn_cast<CallInst>(currb)->getCalledFunction();
                             if (calledFun) {
+                                //Don't recurse on this function call
+                                if (noRecurseSet.count(dyn_cast<CallInst>(currb)) != 0) {
+                                    DEBUG_PRINT("DFS path ended in BasicBlock: " << curr->getName() << " due to already processed recursive call\n");
+                                    curr = NULL;
+                                }
                                 if (!calledFun->empty()) {
                                     //Parse the function and obtain the states
                                     //that are at the exit of the function
                                     DEBUG_PRINT("Analysing CG of " << calledFun->getName() << "\n");
-                                    states = delimitFunction(calledFun,states);
+                                    states = delimitFunction(calledFun,states,noRecurseSet,dyn_cast<CallInst>(currb));
                                     
                                     //This is kinda-sorta hacky, but if we have
                                     //not yet discovered any synch-points we can
@@ -303,11 +380,20 @@ namespace {
                                     //in the called function and say we can
                                     //encounter them first here, too
                                     if (firstReachable) {
-                                        SmallPtrSet<SynchronizationPoint*,1> firstEnc = delimitFunctionDynamic[calledFun].second;
-                                        if (!firstReachable->empty()) {
-                                            firstReachable->insert(firstEnc.begin(),firstEnc.end());
-                                            firstReachable=NULL;
+                                        vector<State> leadingStates = delimitFunctionDynamic[calledFun].leadingReverseStates;
+                                        bool callHadSync = false;
+                                        for (State state : leadingStates) {
+                                            if (state.lastSynch != NULL) {
+                                                callHadSync = true;
+                                                for (State predState : states) {
+                                                    state.precedingInstructions.insert(predState.precedingInstructions.begin(),
+                                                                                       predState.precedingInstructions.end());
+                                                }
+                                            }
+                                            firstReachable->push_back(state);
                                         }
+                                        if (callHadSync)
+                                            firstReachable = NULL;
                                     }
                                 } else {
                                     DEBUG_PRINT("Skipped analysis of " << calledFun->getName() << " due to it having no function body\n");
@@ -322,12 +408,7 @@ namespace {
                         else {
                             //Otherwise, simply add the instruction to the
                             //states we're tracking
-                            DEBUG_PRINT("Added " << *currb << " to:\n");
                             for (State &state : states) {
-                                if (state.lastSynch)
-                                    DEBUG_PRINT("ID " << state.lastSynch->ID << "\n");
-                                else
-                                    DEBUG_PRINT("Context start\n");
                                 state.precedingInstructions.insert(currb);
                             }
                         }
@@ -373,7 +454,7 @@ namespace {
                             //Remember if the branches need to track first reached
                             //synch points
                             if (forbiddenEdges.count(make_pair(curr,*bb)) == 0) {
-                                vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable,curr);
+                                vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable,noRecurseSet,curr);
                                 finishedSearchStates.insert(finishedSearchStates.end(),
                                                             resultStates.begin(),resultStates.end());
                             }
@@ -526,7 +607,7 @@ namespace {
 
         //Determine whether two values refer to the same memory location
         bool alias(Value *val1, Value* val2) {
-            return false; //Dummy for now
+            return false;
         }
 
         //Utility: Determines whether a SynchronizationPoint should be
@@ -539,16 +620,19 @@ namespace {
                 for (int i = 0; i < synchPoint->val->getNumOperands(); ++i)
                     synchPoint1op.insert(synchPoint->val->getOperand(i));
             for (SynchronizationPoint *synchPoint2 : synchVar->synchronizationPoints) {
-                for (Value* val : synchPoint1op) {
-                    if (synchPoint2->op != -1) {
-                        if (alias(val,synchPoint2->val->getOperand(synchPoint2->op)))
-                            return true;
-                    }
-                    else
-                        for (int i = 0; i < synchPoint2->val->getNumOperands(); ++i)
-                            if (alias(val,synchPoint2->val->getOperand(i)))
-                                return true;
-                }
+                if (pointerConflict(synchPoint->val,synchPoint2->val,wM))
+                    return true;
+                //for (Value* val : synchPoint1op) {
+
+                    // if (synchPoint2->op != -1) {
+                    //     if (alias(val,synchPoint2->val->getOperand(synchPoint2->op)))
+                    //         return true;
+                    // }
+                    // else
+                    //     for (int i = 0; i < synchPoint2->val->getNumOperands(); ++i)
+                    //         if (alias(val,synchPoint2->val->getOperand(i)))
+                    //             return true;
+                //}
             }
             return false;
         }
