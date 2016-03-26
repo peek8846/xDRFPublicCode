@@ -218,6 +218,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
     }
   }
 #undef UNIFY_OFFSETS
+  return toReturn;
 }
 
 set<pair<Value*,list<int> > > findBottomLevelValues(Value *val) {

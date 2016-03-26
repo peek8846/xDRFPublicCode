@@ -158,6 +158,7 @@ namespace {
 
             //Analyze each entry point
             for (Function *target : entrypoints) {
+                VERBOSE_PRINT("Starting an analysis from fun: " << target->getName() << "...\n");
                 //Start a delimitation of each targeted function with a dummy state,
                 //starting from a NULL synch point
                 State dummyState;
@@ -169,6 +170,11 @@ namespace {
                 for (State state : endingPoints) {
                     updateSynchPointWithState(state,NULL);
                 }
+                for (pair<BasicBlock* const,SmallPtrSet<State*,2> > &bb : visitedBlocks) {
+                    for (State* state : bb.second)
+                        delete state;
+                }
+                visitedBlocks.clear();
             }
 
             //Determine what synchronization variables we have
@@ -302,16 +308,22 @@ namespace {
         vector<State> delimitFromBlock(BasicBlock *curr,vector<State> states,
                                        vector<State> *firstReachable,
                                        set<CallSite> &noRecurseSet) {
-            map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > dummy;
+            //map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > dummy;
             SmallPtrSet<Instruction*,64> dummy2;
             return delimitFromBlock(curr,states,firstReachable,noRecurseSet,
                                     SmallPtrSet<BasicBlock*,64>(),
-                                    dummy,
                                     dummy2);
         }
 
         //Brute force dbeug chekc
-        SmallPtrSet<Instruction*,128> allHandledInsts;
+        //SmallPtrSet<Instruction*,128> allHandledInsts;
+
+        //Maps basicblocks to reversestates
+        map<BasicBlock*,SmallPtrSet<State*,2> > visitedBlocks;
+
+        //Maps basicblocks to states that need continuation
+        map<BasicBlock*,vector<State> > speccCaseBackedgeBlocks;
+
 
         //Delimits synchronization points starting with the specified block
         //Input: Block to start at and The state before analyzing, as well
@@ -325,7 +337,6 @@ namespace {
                                        vector<State> *firstReachable,
                                        set<CallSite> &noRecurseSet,
                                        SmallPtrSet<BasicBlock*,64> previousBlocks,
-                                       map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > &visitedBlocks,
                                        SmallPtrSet<Instruction*,64> &backAddedInsts) {
             DEBUG_PRINT("Started a new search branch from BasicBlock: "<< curr->getName() << "\n");
 
@@ -339,6 +350,20 @@ namespace {
             vector<State> finishedSearchStates;
             
             while (curr) {
+                DEBUG_PRINT("Handling BasicBlock: " << curr->getName() << "\n");
+                DEBUG_PRINT("Previously finished basicblocks are:\n");
+                for (pair<BasicBlock* const,SmallPtrSet<State*,2> > &bb : visitedBlocks)
+                    DEBUG_PRINT("  " << bb.first->getName() << "\n");
+                DEBUG_PRINT("Previously visited blocks on this branch are:\n");
+                for (BasicBlock* bb : previousBlocks)
+                    DEBUG_PRINT("  " << bb->getName() << "\n");
+                DEBUG_PRINT("Most recently visited synch points are:\n");
+                for (State state : states)
+                    if (state.lastSynch)
+                        DEBUG_PRINT("  " << state.lastSynch->ID << "\n");
+                    else
+                        DEBUG_PRINT("  context begin\n");
+
                 //Backedge case
                 if (previousBlocks.count(curr) != 0) {
                     DEBUG_PRINT("Search stopped in block: " << curr->getName() << " due to backedge\n");
@@ -350,20 +375,23 @@ namespace {
                     curr=NULL;
                     continue;
                 }
-                //Forward-edge case
+                //Forward-edge case || Back-edge case across synch points
                 else if (visitedBlocks.count(curr) != 0) {
                     DEBUG_PRINT("Search stopped in block: " << curr->getName() << " due to forwardedge\n");
                     //We know this path must be completed, thus we simply check
-                    //the mapping and find what synchpoints can be reached from
-                    //here
-                    for (SynchronizationPoint *synchPoint : visitedBlocks[curr]) {
-                        for (State &state : states) {
-                            updateSynchPointWithState(state,synchPoint);
+                    //the mapping and find the reverse states from here
+                    for (State state_ : states) {
+                        speccCaseBackedgeBlocks[curr].push_back(state_);
+                        for (State *state : visitedBlocks[curr]) {
+                            state_.precedingInstructions.insert(state->precedingInstructions.begin(),
+                                                                state->precedingInstructions.end());
+                            updateSynchPointWithState(state_,state->lastSynch);
                             //If the state reaches context end, return it
-                            if (state.lastSynch == NULL) {
-                                finishedSearchStates.push_back(state);
+                            if (state->lastSynch == NULL) {
+                                finishedSearchStates.push_back(state_);
                             }
                         }
+                        speccCaseBackedgeBlocks[curr]=unifyRedundantStates(speccCaseBackedgeBlocks[curr]);
                     }
                     curr=NULL;
                     continue;
@@ -375,10 +403,10 @@ namespace {
                 for (BasicBlock::iterator currb=curr->begin(),
                          curre=curr->end();
                      currb != curre; ++currb) {
-                    if (!(allHandledInsts.insert(&*currb).second)) {
-                        DEBUG_PRINT("Instruction was: " << *currb << "\nin basic block: " << curr->getName() << "\n");
-                        assert("Handled the same instruction twice!");
-                    }
+                    // if (!(allHandledInsts.insert(&*currb).second)) {
+                    //     // DEBUG_PRINT("Instruction was: " << *currb << "\nin basic block: " << curr->getName() << "\n");
+                    //     assert("Handled the same instruction twice!");
+                    // }
                     
                     if (isSynch(currb)) {
                         //Handle synchronization point
@@ -422,12 +450,21 @@ namespace {
                         for (State &state : states) {
                             updateSynchPointWithState(state,synchPoint);
                         }
+
+                        //Update previous basicblocks to shortcut searches through them
+                        for (BasicBlock* block : previousBlocks) {
+                            DEBUG_PRINT("Added BB " << block->getName() << " having the follower Synchpoint " << synchPoint->ID << "\n");
+                            for (State state : states) {
+                                State* newState = new State;
+                                newState->lastSynch=synchPoint;
+                                newState->precedingInstructions=state.precedingInstructions;
+                                visitedBlocks[block].insert(newState);
+                            }
+                        }
+
                         //Clear previous states, all searched paths end here
                         states.clear();
 
-                        for (BasicBlock* block : previousBlocks) {
-                            visitedBlocks[block].insert(synchPoint);
-                        }
                         //If we're not the first one here, then someone else
                         //has already taken care of all the following
                         //paths and we need not continue
@@ -442,10 +479,10 @@ namespace {
                             states.push_back(newState);
                             backAddedInstsLocal.clear();
                             previousBlocks.clear();
-                            //Don't want to clear previousVisited, so instead
-                            //create a new one
-                            map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > visitedBlocks_;
-                            visitedBlocks=visitedBlocks_;
+                            // //Don't want to clear previousVisited, so instead
+                            // //create a new one
+                            // map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > visitedBlocks_;
+                            // visitedBlocks=visitedBlocks_;
                         }
                     } else {
                         //If the instruction is a call, figure out which
@@ -509,13 +546,8 @@ namespace {
                         }
                     }
                 }
-                //After we're done with the current block, handle successor
-                //blocks. But frst we set up the ending iterator to point to
-                //the block after the last block whose edge is not forbidden
                 succ_iterator
                     bb = succ_begin(curr),
-                    bee = succ_begin(curr),
-                    be = succ_begin(curr),
                     bbe = succ_end(curr);
                 
                 if (curr->getSingleSuccessor())
@@ -523,13 +555,36 @@ namespace {
                 else {
                     if (bb == bbe) {
                         DEBUG_PRINT("Search ended in " << curr->getName() << " due to no successing blocks\n");
+                        //Update previous basicblocks to shortcut searches through them
+                        for (BasicBlock* block : previousBlocks) {
+                            DEBUG_PRINT("Added BB " << block->getName() << " being followed by context end\n");
+                            for (State state : states) {
+                                State* newState = new State;
+                                newState->lastSynch=NULL;
+                                newState->precedingInstructions=state.precedingInstructions;
+                                visitedBlocks[block].insert(newState);
+                            }
+                        }
+
                         finishedSearchStates.insert(finishedSearchStates.end(),
                                                     states.begin(),states.end());
                         curr=NULL;
                         continue;
                     } else 
                         for (;bb != bbe; ++bb) {
-                            vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable,noRecurseSet,previousBlocks,visitedBlocks,backAddedInstsLocal);
+
+                            states.insert(states.end(),
+                                          speccCaseBackedgeBlocks[curr].begin(),
+                                          speccCaseBackedgeBlocks[curr].end());
+                            states=unifyRedundantStates(states);
+
+                            succ_iterator cheap_tricks = bb;
+                            if (++cheap_tricks == bbe) {
+                                curr = *bb;
+                                continue;
+                            }
+                            DEBUG_PRINT("Branching from BB: " << curr->getName() << "\n");
+                            vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable,noRecurseSet,previousBlocks,backAddedInstsLocal);
                             //All instructions we got back must be added as preceding to all our current
                             //states, and also our parents
                             backAddedInsts.insert(backAddedInstsLocal.begin(),
@@ -540,55 +595,12 @@ namespace {
                             }
                             finishedSearchStates.insert(finishedSearchStates.end(),
                                                         resultStates.begin(),resultStates.end());
+                            
                         }
                 }
-            //     DEBUG_PRINT("Finding branches from " << curr->getName() << "\n");
-            //     //Set be to be the last basicblock to which the edge is not
-            //     //forbidden
-            //     while (bb != bbe) {
-            //         if (forbiddenEdges.count(make_pair(curr,*bb)) == 0) {
-            //             bee=bb;
-            //             be=++bb;
-            //         } else
-            //             ++bb;
-            //     }
-            //     bb = succ_begin(curr);
-                
-            //     //Handle case where basicblock has no legal successors
-            //     if (bb == be) {
-            //         DEBUG_PRINT("DFS path ended in BasicBlock: " << curr->getName() << " due to no viable branches\n");
-            //         curr = NULL;
-            //     }
-            //     //Handle successors, ignore successors that are forbidden to
-            //     //branch on
-            //     else {
-            //         // if (be != bbe)
-            //         //     DEBUG_PRINT("Last viable branch was: " << (*be)->getName() << "\n");
-            //         //Let current function call handle the last
-            //         //successor that can be branched on
-            //         while (bb != be) {
-            //             if (bb == bee) {
-            //                 forbiddenEdges.insert(make_pair(curr,*bb));
-            //                 curr=*bb;
-            //             }
-            //             else {
-            //                 //Perform a new function call on the branch, obtaining
-            //                 //the resulting state
-            //                 //Remember if the branches need to track first reached
-            //                 //synch points
-            //                 if (forbiddenEdges.count(make_pair(curr,*bb)) == 0) {
-            //                     vector<State> resultStates = delimitFromBlock(*bb,states,firstReachable,noRecurseSet,curr,forbiddenEdges);
-            //                     finishedSearchStates.insert(finishedSearchStates.end(),
-            //                                                 resultStates.begin(),resultStates.end());
-            //                 }
-            //             }
-            //             ++bb;
-            //         }
-            //     }
-            // }
             }
-            finishedSearchStates.insert(finishedSearchStates.end(),
-                                        states.begin(),states.end());
+            // finishedSearchStates.insert(finishedSearchStates.end(),
+            //                             states.begin(),states.end());
             unifyRedundantStates(finishedSearchStates);
             return finishedSearchStates;
         }
@@ -622,10 +634,10 @@ namespace {
                     } else {
                         VERBOSE_PRINT("Context start\n");
                     }
-                    for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
-                             et=synchPoint->precedingInsts[precedingPoint].end();
-                         it != et; ++it)
-                        VERBOSE_PRINT(**it << "\n");
+                    // for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
+                    //          et=synchPoint->precedingInsts[precedingPoint].end();
+                    //      it != et; ++it)
+                    //     VERBOSE_PRINT(**it << "\n");
                 }
                 VERBOSE_PRINT("Following:\n");
                 for (SynchronizationPoint* followingPoint : synchPoint->following) {
@@ -634,10 +646,10 @@ namespace {
                     } else {
                         VERBOSE_PRINT("Context end\n");
                     }
-                    for (auto it=synchPoint->followingInsts[followingPoint].begin(),
-                             et=synchPoint->followingInsts[followingPoint].end();
-                         it != et; ++it)
-                        VERBOSE_PRINT(**it << "\n");
+                    // for (auto it=synchPoint->followingInsts[followingPoint].begin(),
+                    //          et=synchPoint->followingInsts[followingPoint].end();
+                    //      it != et; ++it)
+                    //     VERBOSE_PRINT(**it << "\n");
                 }
             }
             VERBOSE_PRINT("Printing synchronization variable info...\n");
@@ -654,7 +666,7 @@ namespace {
             }
             VERBOSE_PRINT("Printng critical region info...\n");
             for (CriticalRegion *critRegion : criticalRegions) {
-                VERBOSE_PRINT("-----Region-----\n");
+                VERBOSE_PRINT("Region: " << critRegion->ID << "\n");
                 VERBOSE_PRINT("Synchronizes on:\n");
                 for (SynchronizationVariable* synchVar : critRegion->synchsOn) {
                     VERBOSE_PRINT("Synch Var: " << synchVar->ID << "\n");
@@ -687,13 +699,15 @@ namespace {
         //Obtains the set of functions that can be immediately called when
         //executing inst
         SmallPtrSet<Function*,1> getCalledFuns(Instruction *inst) {
-            DEBUG_PRINT("Finding functions that can be called by " << *inst << "\n");
+            //DEBUG_PRINT("Finding functions that can be called by " << *inst << "\n");
             SmallPtrSet<Function*,1> toReturn;
             SmallPtrSet<Value*,8> alreadyVisited;
             if (isCallSite(inst)) {
-                DEBUG_PRINT("which is a callsite\n");
+                //DEBUG_PRINT("which is a callsite\n");
                 CallSite call = CallSite(inst);
                 Value *calledValue = call.getCalledValue();
+                //Rather than doing this: would it be possible with a decent AA to just
+                //check if the value aliases with each function in the module?
                 deque<Value*> calledValues;
                 calledValues.push_back(calledValue);
                 while (!calledValues.empty()) {
@@ -753,7 +767,7 @@ namespace {
                                 toReturn.insert(&fun);
                         }
                     }
-                    else if (auto arg = dyn_cast<GlobalVariable>(nextValue)) {
+                    else if (auto glob = dyn_cast<GlobalVariable>(nextValue)) {
                         //at this point we can basically give up, any function
                         //that has its adress taken can be used here
                         for (Function &fun : inst->getParent()->getParent()->getParent()->getFunctionList()) {
@@ -824,19 +838,28 @@ namespace {
         //Utility: Given a synch point and a state, updates both as if the
         //state leads to the synch point
         void updateSynchPointWithState(State state,SynchronizationPoint *synchPoint) {
+            DEBUG_PRINT("Started an update:\n");
+            DEBUG_PRINT("Preceding: ");
             if (state.lastSynch != NULL) {
-                DEBUG_PRINT("Updating following instructions of syncpoint " << state.lastSynch->ID << "\n");
-                DEBUG_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
+                DEBUG_PRINT("Synchpoint " << state.lastSynch->ID << "\n");
+                //DEBUG_PRINT("Updating following instructions of syncpoint " << state.lastSynch->ID << "\n");
+                //DEBUG_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
                 state.lastSynch->following.insert(synchPoint);
                 state.lastSynch->followingInsts[synchPoint].insert(state.precedingInstructions.begin(),
                                                                    state.precedingInstructions.end());
+            } else {
+                DEBUG_PRINT("Context begin\n");
             }
+            DEBUG_PRINT("Following: ");
             if (synchPoint) {
-                DEBUG_PRINT("Updating preceding instructions of syncpoint " << synchPoint->ID << "\n");
-                DEBUG_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
+                DEBUG_PRINT("Synchpoint " << synchPoint->ID << "\n");
+                //DEBUG_PRINT("Updating preceding instructions of syncpoint " << synchPoint->ID << "\n");
+                //DEBUG_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
                 synchPoint->preceding.insert(state.lastSynch);
                 synchPoint->precedingInsts[state.lastSynch].insert(state.precedingInstructions.begin(),
                                                                state.precedingInstructions.end());
+            } else {
+                DEBUG_PRINT("Context end\n");
             }
         }
 
@@ -844,6 +867,7 @@ namespace {
         //INPUT: The module to analyze and the set into which to insert
         //the results
         void findEntryPoints(Module &M, SmallPtrSet<Function*,4> &targetFunctions) {
+            VERBOSE_PRINT("Determining entry points for threads...\n");
             //For each function that can spawn new threads, find the calls to that function
             for (StringRef funName : threadFunctions) {
                 VERBOSE_PRINT("Finding functions used by " << funName << "\n");
@@ -924,26 +948,34 @@ namespace {
 
         //Sets up the synchronizationVariables structure
         void determineSynchronizationVariables() {
-            DEBUG_PRINT("Determining synchronization variables...\n");
+            VERBOSE_PRINT("Determining synchronization variables...\n");
             for (SynchronizationPoint *synchPoint : synchronizationPoints) {
-                DEBUG_PRINT("Placing synchPoint " << synchPoint->ID << "\n");
-                for (SynchronizationVariable *synchVar : synchronizationVariables) {
+                VERBOSE_PRINT("Placing synchPoint " << synchPoint->ID << "\n");
+                SmallPtrSet<SynchronizationVariable*,1> toDelete;
+                for (auto it = synchronizationVariables.begin();
+                     it != synchronizationVariables.end();) {
+                    SynchronizationVariable *synchVar = *(it++);
                     if (aliasWithSynchVar(synchPoint,synchVar)) {
                         if (synchPoint->synchVar == NULL) {
-                            DEBUG_PRINT("Was placed into synchVar " << synchVar->ID << "\n");
+                            VERBOSE_PRINT("Was placed into synchVar " << synchVar->ID << "\n");
                             synchPoint->setSynchronizationVariable(synchVar);
                         } else {
-                            DEBUG_PRINT("Merged other synchVar " << synchVar->ID
+                            VERBOSE_PRINT("Merged other synchVar " << synchVar->ID
                                         << " into synchVar " << synchPoint->synchVar->ID << " due to multiple aliasing\n");
                             synchPoint->synchVar->merge(synchVar);
-                            synchronizationVariables.erase(synchVar);
-                            delete(synchVar);
+                            toDelete.insert(synchVar);
+                            // synchronizationVariables.erase(synchVar);
+                            // delete(synchVar);
                         }
                     }
                 }
+                for (SynchronizationVariable * synchVar : toDelete) {
+                    synchronizationVariables.erase(synchVar);
+                    delete(synchVar);
+                }
                 if (synchPoint->synchVar == NULL) {
-                    DEBUG_PRINT("Was not placed into any synchVar, creating new synchVar\n");
                     SynchronizationVariable *newSynchVar = new SynchronizationVariable;
+                    VERBOSE_PRINT("Was not placed into any synchVar, creating new synchVar with ID " << newSynchVar->ID << "\n");
                     synchPoint->setSynchronizationVariable(newSynchVar);
                     synchronizationVariables.insert(newSynchVar);
                 }
@@ -952,6 +984,7 @@ namespace {
 
         //Sets up the criticalRegions structure
         void determineCriticalRegions(SmallPtrSet<Function*,4> entryPoints) {
+            VERBOSE_PRINT("Determining critical regions...\n");
             //We know what the first synchpoints are in the entry functions, so we
             //start the analysis there
             for (Function *fun : entryPoints) {
@@ -981,17 +1014,28 @@ namespace {
             newSearchState.currRegion=NULL;
             workQueue.push_back(newSearchState);
             while (!workQueue.empty()) {
-                DEBUG_PRINT("Queue contains: \n");
-                for (SearchState state : workQueue)
-                    DEBUG_PRINT("("<<state.nextPoint<<","<<state.searchDepth<<","<<state.currRegion<<")\n");
-                DEBUG_PRINT("\n");
+                // DEBUG_PRINT("Queue contains: \n");
+                // for (SearchState state : workQueue)
+                //     DEBUG_PRINT("("<<state.nextPoint<<","<<state.searchDepth<<","<<state.currRegion<<")\n");
+                // DEBUG_PRINT("\n");
 
                 SearchState currState = workQueue.front();
                 workQueue.pop_front();
 
+                if (currState.nextPoint)
+                    DEBUG_PRINT("Handling synchpoint: " << currState.nextPoint->ID << "\n");
+                else
+                    DEBUG_PRINT("Handling context end\n");
+                DEBUG_PRINT("At depth: " << currState.searchDepth << "\n");
+                if (currState.currRegion)
+                    DEBUG_PRINT("In region: " << currState.currRegion->ID << "\n");
+                else
+                    DEBUG_PRINT("With no current region\n");
+
                 if (currState.nextPoint == NULL) {
                     if (currState.searchDepth != 0) {
                         VERBOSE_PRINT("Found end of graph context while nesting level was not zero\n");
+                        VERBOSE_PRINT("In region: " << currState.currRegion->ID << "\n");
                     }
                     continue;
                 }
@@ -1045,6 +1089,19 @@ namespace {
                         if (currState.nextPoint->critRegion != critRegion) {
                             critRegion->mergeWith(currState.nextPoint->critRegion);
                             criticalRegions.erase(critRegion);
+                            // DEBUG_PRINT("Replacing " << critRegion << "\n");
+                            // DEBUG_PRINT("Before:\n");
+                            // for (SearchState state : workQueue) {
+                            //     DEBUG_PRINT(state.currRegion << "\n");
+                            // }
+                            for (SearchState &state : workQueue) {
+                                if (state.currRegion == critRegion)
+                                    state.currRegion = currState.nextPoint->critRegion;
+                            }
+                            // DEBUG_PRINT("After:\n");
+                            // for (SearchState state : workQueue) {
+                            //     DEBUG_PRINT(state.currRegion << "\n");
+                            // }
                             delete(critRegion);
                             critRegion=currState.nextPoint->critRegion;
                         } else {
@@ -1052,11 +1109,13 @@ namespace {
                             //region we have detected a loop. Stop search
                             continue;
                         }
+                    } else {
+                        currState.nextPoint->critRegion=critRegion;
                     }
                     int currDepth = currState.searchDepth;
 
                     SearchState newSearchState;
-                    newSearchState.currRegion=currState.currRegion;
+                    newSearchState.currRegion=critRegion;
                     //We might do some redundant work here, but it is fine
                     critRegion->containedSynchPoints.insert(currState.nextPoint);
                     //Add the synch var used by the synch point to the synchsOn for

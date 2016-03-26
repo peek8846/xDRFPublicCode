@@ -111,6 +111,7 @@ public:
     }
     return toReturn;
   }
+
   //Sets the associated synchVar correctly
   void setSynchronizationVariable(SynchronizationVariable* other) {
     if (synchVar)
@@ -118,6 +119,15 @@ public:
     synchVar = other;
     synchVar->synchronizationPoints.insert(this);
   }
+
+  //Iterator-safe variant
+  void setSynchronizationVariableIterSafe(SynchronizationVariable* other) {
+    // if (synchVar)
+    //   synchVar->synchronizationPoints.erase(this);
+    synchVar = other;
+    // synchVar->synchronizationPoints.insert(this);
+  }
+
 
   SmallPtrSet<Instruction*,128> getPrecedingInsts() {
     SmallPtrSet<Instruction*,128> toReturn;
@@ -138,10 +148,13 @@ public:
 
 };
 
+//Obtains and sets the syncpoints of "other"
 void SynchronizationVariable::merge(SynchronizationVariable *other) {
   for (SynchronizationPoint *synchPoint : other->synchronizationPoints) {
-    synchPoint->setSynchronizationVariable(this);
+    synchPoint->setSynchronizationVariableIterSafe(this);
+    synchronizationPoints.insert(synchPoint);
   }
+  other->synchronizationPoints.clear();
   //conflicts.insert(other->conflicts.begin(),other->conflicts.end());
 }
 
@@ -149,6 +162,14 @@ void SynchronizationVariable::merge(SynchronizationVariable *other) {
 //at a time. Basically a subset of the SynchronizationPoint graph
 class CriticalRegion {
 public:
+  CriticalRegion() {
+    static int IDcount=0;
+    ID = IDcount++;
+  }
+
+  //ID useful for debugging
+  int ID;
+
   //The list of synch variables this Critical Region uses
   SmallPtrSet<SynchronizationVariable*,1> synchsOn;
 
