@@ -143,6 +143,9 @@ namespace {
             SmallPtrSet<Function*,4> entrypoints;
 
             wM=&M;
+
+            //Find what functions use synchronizations, this can optimize searching later
+            determineSynchronizedFunctions();
             
             //Find the "main" function
             Function *main = M.getFunction("main");
@@ -248,21 +251,34 @@ namespace {
                         noRecurseSet.insert(callInst);
                 }
                 
+                
                 //Start analysis of the function
                 FunctionAnalysisState funState;
                 funState.astate = FunctionAnalysisState::BeingAnalyzed;
                 delimitFunctionDynamic[start]=funState;
                 State dummyState;
                 dummyState.lastSynch = NULL;
-                vector<State> dummyVector;
-                dummyVector.push_back(dummyState);
-                vector<State> trailStates = delimitFromBlock(&(start->getEntryBlock()),dummyVector,
-                                                             &(delimitFunctionDynamic[start].leadingReverseStates),
-                                                             noRecurseSet);
+                vector<State> trailStates;
+                
+                //Analyze CFG of function if it might synchronize
+                if (synchronizedFunctions.count(start) != 0) {
+                    vector<State> dummyVector;
+                    dummyVector.push_back(dummyState);
+                    trailStates = delimitFromBlock(&(start->getEntryBlock()),dummyVector,
+                                                   &(delimitFunctionDynamic[start].leadingReverseStates),
+                                                   noRecurseSet);
+                }
+                //Otherwise, just add all the instructions executable within it or functions it calls
+                else {
+                    SmallPtrSet<Instruction*,128> returned = getExecutableInsts(start);
+                    dummyState.precedingInstructions.insert(returned.begin(),returned.end());
+                    trailStates.push_back(dummyState);
+                }
                 delimitFunctionDynamic[start].astate = FunctionAnalysisState::Analyzed;
                 delimitFunctionDynamic[start].trailingStates.insert(delimitFunctionDynamic[start].trailingStates.begin(),
                                                                     trailStates.begin(),
                                                                     trailStates.end());
+
             }
 
             vector<State> toReturn;
@@ -492,9 +508,9 @@ namespace {
                             for (Function* calledFun : calledFuns) {
                                 //Don't recurse on this function call
                                 if (noRecurseSet.count(CallSite(currb)) != 0) {
-                                    DEBUG_PRINT("DFS path ended in BasicBlock: " << curr->getName() << " due to already processed recursive call\n");
-                                    curr = NULL;
-                                    continue;
+                                    // DEBUG_PRINT("DFS path ended in BasicBlock: " << curr->getName() << " due to already processed recursive call\n");
+                                    // curr = NULL;
+                                    // continue;
                                 } else if (!calledFun->empty()) {
                                     //Parse the function and obtain the states
                                     //that are at the exit of the function
@@ -1148,7 +1164,84 @@ namespace {
                 }
             }
         }
+
+        //The set of functions that may synchronize with other functions while executing
+        SmallPtrSet<Function*,2> synchronizedFunctions;
+
+        void determineSynchronizedFunctions() {
+            deque<Value*> pthUsersQueue;
+            SmallPtrSet<Value*,32> visitedValues;
+
+            //for (auto pI = pthFunctions.begin(); pI != pthFunctions.end(); ++pI) {
+            for (StringRef syncName : synchFunctions) {
+                Function* syncFun = wM->getFunction(syncName);
+                if (syncFun) {
+                    for (auto uI = syncFun->users().begin(); uI != syncFun->users().end(); ++uI) {
+                        pthUsersQueue.push_back(*uI);
+                    }
+                } else {
+                    VERBOSE_PRINT("Module does not contain the synchronization function: " << syncName << "\n");
+                }
+            }
+            
+            while (!pthUsersQueue.empty()) {
+                //If we're an instruction, add the tracked functions
+                Value *nextVal = pthUsersQueue.front(); pthUsersQueue.pop_front();
+                //If we have previously handled this value, skip it
+                if (!(visitedValues.insert(nextVal).second))
+                    continue;
+                //Otherwise, if this value is an instruction, add the function it is
+                //in to the synchronized functions. And add the users of that function
+                //to the queue. If the function is previously handled then skip
+                //adding the users of that function
+                if (Instruction *user = dyn_cast<Instruction>(nextVal)) {
+                    Function *inFunction=user->getParent()->getParent();
+                    if (!(synchronizedFunctions.insert(inFunction).second))
+                        continue;
+                    for (auto uI = inFunction->users().begin(); uI != inFunction->users().end(); ++uI) {
+                        pthUsersQueue.push_back(*uI);
+                    }
+                } 
+                //If the value is not an instruction, add the users of it to the queue
+                else {
+                    for (auto uI = nextVal->users().begin(); uI != nextVal->users().end(); ++uI) {
+                        pthUsersQueue.push_back(*uI);
+                    }                    
+                }
+            }
+        }
+
+        map<Function*,SmallPtrSet<Instruction*,128> > getExecutableInstsDynamic;
+
+        //Obtains all functions executable when executing fun
+        SmallPtrSet<Instruction*,128> getExecutableInsts(Function *fun) {
+            SmallPtrSet<Function*,4> visitedFuns;
+            return getExecutableInstsDynamic[fun]=getExecutableInstsProper(fun,visitedFuns);
+        }
+
+        SmallPtrSet<Instruction*,128> getExecutableInstsProper(Function *fun, SmallPtrSet<Function*,4> &visitedFuns) {
+            if (getExecutableInstsDynamic.count(fun) != 0)
+                return getExecutableInstsDynamic[fun];
+
+            SmallPtrSet<Instruction*,128> toReturn;
+            if (visitedFuns.insert(fun).second) {
+                for (inst_iterator it = inst_begin(fun);
+                     it != inst_end(fun);
+                     ++it) {
+                    Instruction *inst = &*it;
+                    toReturn.insert(inst);
+                    SmallPtrSet<Function*,1> calledFuns = getCalledFuns(inst);
+                    for (Function *cFun : calledFuns) {
+                        SmallPtrSet<Instruction*,128> returned = getExecutableInstsProper(cFun,visitedFuns);
+                        toReturn.insert(returned.begin(),returned.end());
+                    }
+                }
+            }
+            return toReturn;
+        }
+
         
+
         //Find the data flow conflicts across synchronization points
         // void determineDataflowConflicts() {
         //     for (SynchronizationVariable* synchVar : synchronizationVariables) {
