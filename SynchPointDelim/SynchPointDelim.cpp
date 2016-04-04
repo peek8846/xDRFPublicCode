@@ -1213,7 +1213,6 @@ namespace {
 
         //Sets up the criticalRegions structure
         void determineCriticalRegions(SmallPtrSet<Function*,4> entryPoints) {
-            return;
             VERBOSE_PRINT("Determining critical regions...\n");
             //We know what the first synchpoints are in the entry functions, so we
             //start the analysis there
@@ -1337,10 +1336,10 @@ namespace {
                             // for (SearchState state : workQueue) {
                             //     DEBUG_PRINT(state.currRegion << "\n");
                             // }
-                            // for (SearchState &state : workQueue) {
-                            //     if (state.currRegion == critRegion)
-                            //         state.currRegion = currState.nextPoint->critRegion;
-                            // }
+                            for (SearchState &state : workQueue) {
+                                if (state.currRegion == critRegion)
+                                    state.currRegion = currState.nextPoint->critRegion;
+                            }
                             // DEBUG_PRINT("After:\n");
                             // for (SearchState state : workQueue) {
                             //     DEBUG_PRINT(state.currRegion << "\n");
