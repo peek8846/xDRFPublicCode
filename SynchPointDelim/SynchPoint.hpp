@@ -6,6 +6,9 @@
 // Jonatan Waern
 //===----------------------------------------------------------------------===//
 
+#ifndef _SYNCHPOINTHEADER_
+#define _SYNCHPOINTHEADER_
+
 #include <set>
 #include <map>
 
@@ -229,3 +232,4 @@ public:
     return toReturn;
   }
 };
+#endif

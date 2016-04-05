@@ -28,6 +28,7 @@
 // #include "llvm/ADT/SmallVector.h"
 // #include "llvm/ADT/ArrayRef.h"
 // #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -64,6 +65,7 @@
 #include "llvm/Pass.h"
 
 #include "SynchPoint.hpp"
+#include "SynchPointDelim.hpp"
 #include "UseChainAliasing.cpp"
 
 #define LIBRARYNAME "SynchPointDelim"
@@ -125,6 +127,16 @@ namespace {
                                   onewayFromFunctions.end());
             synchFunctions.insert(onewayToFunctions.begin(),
                                   onewayToFunctions.end());
+        }
+
+        //Manually free the data structures left over to be used by other passes
+        ~SynchPointDelim() {
+            for (SynchronizationPoint* ptr : synchronizationPoints)
+                delete ptr;
+            for (SynchronizationVariable* ptr : synchronizationVariables)
+                delete ptr;
+            for (CriticalRegion* ptr : criticalRegions)
+                delete ptr;
         }
 
     public:
@@ -197,24 +209,26 @@ namespace {
             //Determine the critical regions we have
             determineCriticalRegions(entrypoints);
 
-            //Determine the data-flow conflicts across these points
-            //determineDataflowConflicts();
-
             //Print the info
             printInfo();
             
+            clearAnalysisHelpStructures();
+
             return false; //Pure analysis, should not change any code
         }
 
         //These data structures are the results of the analysis
-        //TODO: There should propably be interface functions towards
-        //synchronization variables that mean that direct access
-        //to synchronizationPoints are not necessary
         SmallPtrSet<SynchronizationPoint*,32> synchronizationPoints;
         SmallPtrSet<SynchronizationVariable*,8> synchronizationVariables;
         SmallPtrSet<CriticalRegion*,8> criticalRegions;
 
     private:
+
+        void clearAnalysisHelpStructures() {
+            delimitFunctionDynamic.clear();
+            synchronizedFunctions.clear();
+            getExecutableInstsDynamic.clear();
+        }
 
         //The state tracks the DFS of the program flow
         //Contains the most recent synch point tracked on this path
