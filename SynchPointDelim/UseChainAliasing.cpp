@@ -1,3 +1,5 @@
+#ifndef _USECHAINALIASING_
+#define _USECHAINALIASING_
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/BasicBlock.h"
@@ -313,3 +315,5 @@ bool pointerConflict(Instruction *P1, Instruction *P2, Module *M) {
   }
   return toReturn;
 }
+
+#endif

@@ -1,6 +1,8 @@
-//===- Identify Synchronization Points, DRF Paths and Data Conflicts ------===//
-// Analysis Compiler Pass to Identify the synchronization points and the
-// data conflicts over them
+#ifndef _SYNCHPOINTDELIM_
+#define _SYNCHPOINTDELIM_
+//===- Identify Synchronization Points, DRF Paths and Critical REgions ----===//
+// Analysis Compiler Pass to Identify the synchronization points, the paths between them
+// and the critical regions
 //===----------------------------------------------------------------------===//
 // Created at 1/2 -16
 // Jonatan Waern
@@ -65,7 +67,7 @@
 #include "llvm/Pass.h"
 
 #include "SynchPoint.hpp"
-#include "SynchPointDelim.hpp"
+//#include "SynchPointDelim.hpp"
 #include "UseChainAliasing.cpp"
 
 #define LIBRARYNAME "SynchPointDelim"
@@ -86,10 +88,9 @@ using namespace llvm;
 using namespace std;
 
 static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for synchpoint graph"),
-                                       cl::value_desc("filename"));
+                                   cl::value_desc("filename"));
 
 namespace {
-
 
     //These are the functions that start critical regions:
     set<StringRef> critBeginFunctions = {"pthread_mutex_lock"};
@@ -115,7 +116,7 @@ namespace {
     //These are the function to treat as if they spawn new
     //threads
     set<StringRef> threadFunctions = {"pthread_create"};
-
+    
     struct SynchPointDelim : public ModulePass {
         static char ID;
         SynchPointDelim() : ModulePass(ID) {
@@ -128,7 +129,7 @@ namespace {
             synchFunctions.insert(onewayToFunctions.begin(),
                                   onewayToFunctions.end());
         }
-
+        
         //Manually free the data structures left over to be used by other passes
         ~SynchPointDelim() {
             for (SynchronizationPoint* ptr : synchronizationPoints)
@@ -140,7 +141,6 @@ namespace {
         }
 
     public:
-        int DR_ID;
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
             //AU.addRequired<DominatorTreeWrapperPass>();
             //AU.addRequired<AliasAnalysis>();
@@ -149,9 +149,9 @@ namespace {
             //AU.addRequired<LoopInfoWrapperPass>();
             //Here we would "require" the previous AA pass
         }
-
+    
         Module *wM;
-
+    
         //The main runOnModule function is divided in three parts
         //The first part finds synchronization points and the drf paths between
         //them
@@ -222,6 +222,14 @@ namespace {
         SmallPtrSet<SynchronizationVariable*,8> synchronizationVariables;
         SmallPtrSet<CriticalRegion*,8> criticalRegions;
 
+        // SynchPointResults getResults() {
+        //     SynchPointResults results;
+        //     results.synchronizationPoints=synchronizationPoints;
+        //     results.synchronizationVariables=synchronizationVariables;
+        //     results.criticalRegions=criticalRegions;
+        //     return results;
+        // }
+
     private:
 
         void clearAnalysisHelpStructures() {
@@ -265,7 +273,6 @@ namespace {
             delimitFunction(start,noRecurseSet,CallSite());
         }
 
-        //        vector<State> delimitFunction(Function *start,vector<State> states, set<CallSite> &noRecurseSet, CallSite callInst) {
         void delimitFunction(Function *start, set<CallSite> &noRecurseSet, CallSite callInst) {
             LIGHT_PRINT("Starting analysis of function: " << start->getName() << "\n");
             if (isNotNull(callInst))
@@ -295,14 +302,14 @@ namespace {
                 
                 //Analyze CFG of function if it might synchronize
                 if (synchronizedFunctions.count(start) != 0) {
-                //if (true) {
+                    //if (true) {
                     vector<State> dummyVector;
                     dummyVector.push_back(dummyState);
-                    VERBOSE_PRINT("Analyzing the CFG of " << start->getName() << "...\n");
+                    //VERBOSE_PRINT("Analyzing the CFG of " << start->getName() << "...\n");
                     trailStates = delimitFromBlock(&(start->getEntryBlock()),dummyVector,
                                                    start,
                                                    noRecurseSet);
-                    VERBOSE_PRINT("Done analyzing the CFG of " << start->getName() << "\n");
+                    //VERBOSE_PRINT("Done analyzing the CFG of " << start->getName() << "\n");
                 }
                 //Otherwise, just add all the instructions executable within it or functions it calls
                 else {
@@ -395,9 +402,6 @@ namespace {
                                     SmallPtrSet<BasicBlock*,64>(),
                                     dummy1,dummy2);
         }
-
-        //Brute force dbeug chekc
-        //SmallPtrSet<Instruction*,128> allHandledInsts;
 
         //Maps basicblocks to reversestates
         map<BasicBlock*,SmallPtrSet<State*,2> > visitedBlocks;
@@ -823,7 +827,7 @@ namespace {
                     }                    
                 }
                 for (Function &fun : wM->getFunctionList()) {
-                //for (Function *fun : entryPoints) {
+                    //for (Function *fun : entryPoints) {
                     for (State funState : delimitFunctionDynamic[&fun].leadingReverseStates) {
                         if (funState.lastSynch)
                             outputGraph << "\"" << (fun.getName().data()) << " entry\" -> \"" << PRINTSYNC(funState.lastSynch) << "\";\n";
@@ -1100,7 +1104,7 @@ namespace {
                 LIGHT_PRINT("Tracked "<<state.precedingInstructions.size() << " instructions\n");
                 synchPoint->preceding.insert(state.lastSynch);
                 synchPoint->precedingInsts[state.lastSynch].insert(state.precedingInstructions.begin(),
-                                                               state.precedingInstructions.end());
+                                                                   state.precedingInstructions.end());
             } else {
                 LIGHT_PRINT("Context end\n");
             }
@@ -1176,14 +1180,14 @@ namespace {
                     return true;
                 //for (Value* val : synchPoint1op) {
 
-                    // if (synchPoint2->op != -1) {
-                    //     if (alias(val,synchPoint2->val->getOperand(synchPoint2->op)))
-                    //         return true;
-                    // }
-                    // else
-                    //     for (int i = 0; i < synchPoint2->val->getNumOperands(); ++i)
-                    //         if (alias(val,synchPoint2->val->getOperand(i)))
-                    //             return true;
+                // if (synchPoint2->op != -1) {
+                //     if (alias(val,synchPoint2->val->getOperand(synchPoint2->op)))
+                //         return true;
+                // }
+                // else
+                //     for (int i = 0; i < synchPoint2->val->getNumOperands(); ++i)
+                //         if (alias(val,synchPoint2->val->getOperand(i)))
+                //             return true;
                 //}
             }
             return false;
@@ -1204,7 +1208,7 @@ namespace {
                             synchPoint->setSynchronizationVariable(synchVar);
                         } else {
                             VERBOSE_PRINT("Merged other synchVar " << synchVar->ID
-                                        << " into synchVar " << synchPoint->synchVar->ID << " due to multiple aliasing\n");
+                                          << " into synchVar " << synchPoint->synchVar->ID << " due to multiple aliasing\n");
                             synchPoint->synchVar->merge(synchVar);
                             toDelete.insert(synchVar);
                             // synchronizationVariables.erase(synchVar);
@@ -1242,7 +1246,7 @@ namespace {
         //a threads entry. Meaning it should be a synchpoint in a leadingReverseState
         //of an entrypoint function
         void sectionSynchronizationPointsIntoCriticalRegions(SynchronizationPoint* synchPoint) {
-            VERBOSE_PRINT("Starting Critical Region delimitation from synch point: " << synchPoint->ID << "\n");
+            //VERBOSE_PRINT("Starting Critical Region delimitation from synch point: " << synchPoint->ID << "\n");
             struct SearchState {
                 SynchronizationPoint *nextPoint;
                 int searchDepth;
@@ -1267,20 +1271,20 @@ namespace {
                 SearchState currState = workQueue.front();
                 workQueue.pop_front();
 
-                if (currState.nextPoint)
-                    VERBOSE_PRINT("Handling synchpoint: " << currState.nextPoint->ID << "\n");
-                else
-                    VERBOSE_PRINT("Handling context end\n");
-                VERBOSE_PRINT("At depth: " << currState.searchDepth << "\n");
-                if (currState.currRegion)
-                    VERBOSE_PRINT("In region: " << currState.currRegion->ID << "\n");
-                else
-                    VERBOSE_PRINT("With no current region\n");
+                // if (currState.nextPoint)
+                //     VERBOSE_PRINT("Handling synchpoint: " << currState.nextPoint->ID << "\n");
+                // else
+                //     VERBOSE_PRINT("Handling context end\n");
+                // VERBOSE_PRINT("At depth: " << currState.searchDepth << "\n");
+                // if (currState.currRegion)
+                //     VERBOSE_PRINT("In region: " << currState.currRegion->ID << "\n");
+                // else
+                //     VERBOSE_PRINT("With no current region\n");
 
                 if (currState.nextPoint == NULL) {
                     if (currState.searchDepth != 0) {
-                        VERBOSE_PRINT("Found end of graph context while nesting level was not zero\n");
-                        VERBOSE_PRINT("In region: " << currState.currRegion->ID << "\n");
+                        //VERBOSE_PRINT("Found end of graph context while nesting level was not zero\n");
+                        //VERBOSE_PRINT("In region: " << currState.currRegion->ID << "\n");
                     }
                     continue;
                 }
@@ -1291,7 +1295,7 @@ namespace {
                 //If we have already handled this synch point at this depth
                 //skip it (most commonly skips handling it at depth 0)
                 if (synchHandledNestLevels[currState.nextPoint].count(currState.searchDepth)) {
-                    VERBOSE_PRINT("Skipped due to already handled at thist nest level\n");
+                    //VERBOSE_PRINT("Skipped due to already handled at thist nest level\n");
                     continue;
                 }
 
@@ -1303,7 +1307,7 @@ namespace {
                     //If we encounter a synch point that does not start a critical region outside a critical region,
                     //stop that search branch as it cannot be an executable branch
                     if (!(currState.nextPoint->isCritBegin)) {
-                        VERBOSE_PRINT("Encountered synch point: " << currState.nextPoint->ID << "(value=" << *(currState.nextPoint->val) << ") while not in a critical region\n");
+                        //VERBOSE_PRINT("Encountered synch point: " << currState.nextPoint->ID << "(value=" << *(currState.nextPoint->val) << ") while not in a critical region\n");
                         //VERBOSE_PRINT("Critical Region delimitation broken\n");
                         //return;
                         //assert("Encountered synch point not starting critical region outside critical region" && false);
@@ -1535,6 +1539,7 @@ static RegisterPass<SynchPointDelim> X("SPDelim",
                                        "Identify Synch Points and Data Conflicts pass",
                                        true,
                                        true);
+#endif
 
 /* Local Variables: */
 /* mode: c++ */
