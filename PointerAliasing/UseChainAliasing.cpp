@@ -15,7 +15,7 @@
 bool AssumeDGEPAliasConstBase = true;
 bool AssumeDGEPNoAlias = true;
 
-Module *wM;
+Module *usechain_wm;
 
 //Gets the called function of a callsite irregardless of casts
 Function *getStripCall(CallSite *callsite) {
@@ -87,12 +87,12 @@ bool handleDynamicGEP(Value **pt_,APInt &offset) {
 
     // Handle a struct index, which adds its field offset to the pointer.
     if (StructType *STy = dyn_cast<StructType>(currType)) {
-      const StructLayout *SL = wM->getDataLayout().getStructLayout(STy);
+      const StructLayout *SL = usechain_wm->getDataLayout().getStructLayout(STy);
       offsetint += SL->getElementOffset(curroffset);
     } else {
       // For array or vector indices, scale the index by the size of the type.
       offsetint += curroffset *
-	wM->getDataLayout().getTypeAllocSize(nextType);
+	usechain_wm->getDataLayout().getTypeAllocSize(nextType);
     }
   }
   *pt_ = cast<GetElementPtrInst>(pt)->getPointerOperand();
@@ -132,9 +132,10 @@ SmallPtrSet<Value*,1024> visitedBottomLevelValues;
         
         
 set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
-  int pointerSize = wM->getDataLayout().getPointerSizeInBits(cast<PointerType>(val->getType())->getAddressSpace());
+  //errs() << "Finding bottom level values of " << *val << "\n";
+  int pointerSize = usechain_wm->getDataLayout().getPointerSizeInBits(cast<PointerType>(val->getType())->getAddressSpace());
   APInt offset = APInt(pointerSize,0);
-  Value* strip = val->stripAndAccumulateInBoundsConstantOffsets(wM->getDataLayout(),offset);
+  Value* strip = val->stripAndAccumulateInBoundsConstantOffsets(usechain_wm->getDataLayout(),offset);
   int intoffset = offset.getLimitedValue();
   set<pair<Value*,list<int> > > toReturn;
   bool appendOffset = true;
@@ -148,6 +149,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
   //and do not add pointers to nextPointers
   if (auto inst = dyn_cast<Instruction>(strip)) {
     if (isCallSite(inst)) {
+      //errs() << "Stripped value is call " << *inst << "\n";
       CallSite call(strip);
       Function* calledFun = getStripCall(&call);
       if (calledFun && (calledFun->getName().equals("malloc") ||
@@ -164,20 +166,33 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
     }
   }
   if (auto glob = dyn_cast<GlobalVariable>(strip)) {
+    //errs() << "Stripped value is global\n";
     //errs() << "Found global: " << *glob << "\n";
     toReturn.insert(make_pair(glob,list<int>(1,intoffset)));
   }
   if (auto arg = dyn_cast<Argument>(strip)) {
+    //errs() << "Stripped value is argument\n";
     //errs() << "Found argument: " << *arg << "\n";
-    toReturn.insert(make_pair((Value*)NULL,list<int>(1,intoffset)));
+    for (auto user : arg->getParent()->users()) {
+      if (Instruction *inst = dyn_cast<Instruction>(user)) {
+	if (isCallSite(inst)) {
+	  CallSite call(inst);
+	  appendOffset = false;
+	  nextPointers.insert(call.getArgument(arg->getArgNo()));
+	}
+      }
+    }
+    //toReturn.insert(make_pair((Value*)NULL,list<int>(1,intoffset)));
   }
 
   //These are the recursive cases, they add pointers to nextPointers
   //and define how to merge offsets
   if (auto load = dyn_cast<LoadInst>(strip)) {
+    //errs() << "Stripped value is load " << *load << "\n";
     nextPointers.insert(load->getPointerOperand());
   }
   if (auto dyngep = dyn_cast<GetElementPtrInst>(strip)) {
+    //errs() << "Stripped value is dynamic gep " << *dyngep << "\n";
     nextPointers.insert(dyngep->getPointerOperand());
     appendOffset = false;
     if (AssumeDGEPAliasConstBase) {
@@ -197,6 +212,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
     }
   }
   if (auto phi = dyn_cast<PHINode>(strip)) {
+    //errs() << "Stripped value is phinode\n";
     appendOffset = false;
     for (Use &use : cast<PHINode>(strip)->incoming_values())
       nextPointers.insert(use.get());
@@ -231,11 +247,17 @@ set<pair<Value*,list<int> > > findBottomLevelValues(Value *val) {
 map<pair<Value*,Value*>, bool> pointerAliasDynamic;
 
 bool pointerAlias(Value *pt1, Value *pt2) {
-  if (pointerAliasDynamic.count(make_pair(pt1,pt2)) != 0)
+  //errs() << "Usechainpointeralias is comparing " << *pt1 << " and " << *pt2 << "\n";
+  if (pointerAliasDynamic.count(make_pair(pt1,pt2)) != 0) {
+    //errs() << "Was previously resolved to " << (pointerAliasDynamic[make_pair(pt1,pt2)] ? "aliasing" : "not aliasing") << "\n"; 
     return pointerAliasDynamic[make_pair(pt1,pt2)];
+  }
 
   set<pair<Value*,list<int> > > bottomUsesPt1 = findBottomLevelValues(pt1);
   set<pair<Value*,list<int> > > bottomUsesPt2 = findBottomLevelValues(pt2);
+
+  //errs() << "pt1 bUses size: " << bottomUsesPt1.size() << "\n";
+  //errs() << "pt2 bUses size: " << bottomUsesPt2.size() << "\n";
 
   bool toReturn = false;
 
@@ -246,9 +268,11 @@ bool pointerAlias(Value *pt1, Value *pt2) {
 	   end_pt2pair = bottomUsesPt2.end();
 	 pt2pair != end_pt2pair && !toReturn; ++pt2pair) {
       if (!pt1pair->first || !pt2pair->first) {
+	//errs() << "At least one of the pointers got a NULL bottomLevelValue\n";
 	toReturn = false;
 	continue;
       }
+      //errs() << "Comparing " << *(pt1pair->first) << " and " << *(pt2pair->first) << "\n";
       if (pt1pair->first != pt2pair->first)
 	continue;
       auto pt1b = pt1pair->second.rbegin();
@@ -280,13 +304,13 @@ SmallPtrSet<Value*,1024> visitedAliasValues;
 //Checks wether the pointer arguments to two instructions
 //do not alias
 bool pointerConflict(Instruction *P1, Instruction *P2, Module *M) {
-  wM = M;
+  usechain_wm = M;
   SmallPtrSet<Value*,4> P1Pargs;
   SmallPtrSet<Value*,4> P2Pargs;
   if (auto P1_load = dyn_cast<LoadInst>(P1))
     P1Pargs.insert(P1_load->getPointerOperand());
   if (auto P1_store = dyn_cast<StoreInst>(P1))
-                P1Pargs.insert(P1_store->getPointerOperand());
+    P1Pargs.insert(P1_store->getPointerOperand());
   if (auto P1_call = CallSite(P1))
     for (Use &arg : P1_call.args())
       if (isa<PointerType>(arg.get()->getType()))
