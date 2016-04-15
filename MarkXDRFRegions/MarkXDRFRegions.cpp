@@ -10,7 +10,7 @@
 #include <string>
 
 // #include <stack>
-#include <set>
+// #include <set>
 #include <vector>
 #include <deque>
 // #include <list>
@@ -96,7 +96,7 @@ namespace {
             XDRFExtension &xdrfextended  = getAnalysis<XDRFExtension>();
 
 	    if (xdrfextended.nDRFRegions.size() == 0)
-	      return false;
+                return false;
 
 	    Function *beginNDRF = createDummyFunction("begin_NDRF",M);
 	    Function *endNDRF = createDummyFunction("end_NDRF",M);
@@ -104,51 +104,55 @@ namespace {
 	    Function *endXDRF = createDummyFunction("end_XDRF",M);
 
 	    for (nDRFRegion * region : xdrfextended.nDRFRegions) {
-	      for (Instruction * inst : region->beginsAt) {
-		createDummyCall(beginNDRF,inst);
-	      }
-	      for (Instruction * inst : region->endsAt) {
-		createDummyCall(endNDRF,inst,false);
-	      }
+                for (Instruction * inst : region->beginsAt) {
+                    if (region->enclave)
+                        createDummyCall(endXDRF,inst);
+                    createDummyCall(beginNDRF,inst);
+                }
+                for (Instruction * inst : region->endsAt) {
+                    if (region->enclave)
+                        createDummyCall(beginXDRF,inst,false);
+                    createDummyCall(endNDRF,inst,false);
+                }
 	    }
 
             return true;
         }
     private:
-      //Sets dummy to point to a function with name and a dummy implementation
+        //Sets dummy to point to a function with name and a dummy implementation
       
-      Function *createDummyFunction(string name, Module &M) {
-	assert(!M.getFunction(name) && "Error creating dummy function, a function with that name already existed");
-	Function *toReturn =
-	  cast<Function>(M.getOrInsertFunction(name,
-					       FunctionType::get(Type::getVoidTy(getGlobalContext()),
-								 true)));
-	toReturn->addFnAttr(Attribute::NoInline);
-	toReturn->addFnAttr(Attribute::OptimizeNone);
-	BasicBlock *block = BasicBlock::Create(getGlobalContext(),
-					       "entry", toReturn);
-	IRBuilder<true, NoFolder> builder(block);
-	// //Use a redundant add as a no-op
-	// builder.CreateBinOp(Instruction::Add,
-	// 		    ConstantInt::get(getGlobalContext(),APInt(32,1)),
-	// 		    ConstantInt::get(getGlobalContext(),APInt(32,1)));
-	builder.CreateRetVoid();
-	return toReturn;
-      }
+        Function *createDummyFunction(string name, Module &M) {
+            assert(!M.getFunction(name) && "Error creating dummy function, a function with that name already existed");
+            Function *toReturn =
+                cast<Function>(M.getOrInsertFunction(name,
+                                                     FunctionType::get(Type::getVoidTy(getGlobalContext()),
+                                                                       true)));
+            toReturn->addFnAttr(Attribute::NoInline);
+            toReturn->addFnAttr(Attribute::OptimizeNone);
+            BasicBlock *block = BasicBlock::Create(getGlobalContext(),
+                                                   "entry", toReturn);
+            IRBuilder<true, NoFolder> builder(block);
+            // //Use a redundant add as a no-op
+            // builder.CreateBinOp(Instruction::Add,
+            // 		    ConstantInt::get(getGlobalContext(),APInt(32,1)),
+            // 		    ConstantInt::get(getGlobalContext(),APInt(32,1)));
+            builder.CreateRetVoid();
+            return toReturn;
+        }
       
-      void createDummyCall(Function* fun, Instruction* insertBef) {
-	createDummyCall(fun,insertBef,true);
-      }
+        void createDummyCall(Function* fun, Instruction* insertBef) {
+            createDummyCall(fun,insertBef,true);
+        }
 
-      void createDummyCall(Function* fun, Instruction* insertBef, bool before) {
-	vector<Value*> arglist;
-	ArrayRef<Value*> args(arglist);
-	CallInst* markCall = CallInst::Create(fun,args);
-	if (before)
-	  markCall->insertBefore(insertBef);
-	else
-	  markCall->insertAfter(insertBef);
-      }
+        void createDummyCall(Function* fun, Instruction* insertBef, bool before) {
+            vector<Value*> arglist;
+            ArrayRef<Value*> args(arglist);
+            CallInst* markCall = CallInst::Create(fun,args);
+            if (before)
+                markCall->insertBefore(insertBef);
+            else
+                markCall->insertAfter(insertBef);
+        }
     };
 }
 
