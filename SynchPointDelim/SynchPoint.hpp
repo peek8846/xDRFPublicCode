@@ -180,6 +180,8 @@ public:
   SmallPtrSet<SynchronizationPoint*,1> entrySynchPoints;
   SmallPtrSet<SynchronizationPoint*,1> exitSynchPoints;
 
+  bool firstRegionInEntry=false;
+
   void mergeWith(CriticalRegion* other) {
     other->containedSynchPoints.insert(containedSynchPoints.begin(),
 				       containedSynchPoints.end());

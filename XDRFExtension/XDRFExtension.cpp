@@ -68,7 +68,7 @@
 //#include "../SynchPointDelim/SynchPointDelim.cpp"
 #include "../SynchPointDelim/SynchPointDelim.cpp"
 #include "../SynchPointDelim/SynchPoint.hpp"
-#include "../SynchPointDelim/UseChainAliasing.cpp"
+#include "../PointerAliasing/AliasCombiner.cpp"
 
 #define LIBRARYNAME "XDRFExtension"
 
@@ -87,6 +87,9 @@
 using namespace llvm;
 using namespace std;
 
+static cl::opt<string> graphOutput2("g2", cl::desc("Specify output dot file for nDRF region graph"),
+                                    cl::value_desc("filename"));
+
 struct nDRFRegion {
     nDRFRegion() {
         static int rID = 0;
@@ -99,12 +102,30 @@ struct nDRFRegion {
     SmallPtrSet<Instruction*,128> containedInstructions;
     SmallPtrSet<nDRFRegion*,2> precedingRegions;
     SmallPtrSet<nDRFRegion*,2> followingRegions;
-    SmallPtrSet<Instruction*,128> precedingInstructions;
-    SmallPtrSet<Instruction*,128> followingInstructions;
+    map<nDRFRegion*,SmallPtrSet<Instruction*,16> > precedingInstructions;
+    map<nDRFRegion*,SmallPtrSet<Instruction*,16> > followingInstructions;
     SmallPtrSet<nDRFRegion*,2> synchsWith;
-    set<pair<Instruction*,Instruction*> > conflicts;
+    set<pair<Instruction*,Instruction*> > conflictsBetweenDRF;
+    set<pair<Instruction*,pair<nDRFRegion*,Instruction*> > > conflictsTowardsDRF;
     bool receivesSignal=false, sendsSignal=false;
     bool enclave=false;
+    bool startHere=false;
+
+    SmallPtrSet<Instruction*,128> getPrecedingInsts() {
+        SmallPtrSet<Instruction*,128> toReturn;
+        for (nDRFRegion* region : precedingRegions)
+            toReturn.insert(precedingInstructions[region].begin(),
+                            precedingInstructions[region].end());
+        return toReturn;
+    }
+    
+    SmallPtrSet<Instruction*,128> getFollowingInsts() {
+        SmallPtrSet<Instruction*,128> toReturn;
+        for (nDRFRegion* region : followingRegions)
+            toReturn.insert(followingInstructions[region].begin(),
+                            followingInstructions[region].end());
+        return toReturn;
+    }
 };
 
 namespace {
@@ -116,16 +137,28 @@ namespace {
 
     public:
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
-            //AU.addRequired<AliasAnalysis>();
+            AU.addRequired<AliasAnalysis>();
             AU.addRequired<SynchPointDelim>();
             //Here we would "require" the previous AA pass
         }
       
+        AliasCombiner *aacombined;
+
         virtual bool runOnModule(Module &M) {
             SynchPointDelim &syncdelimited  = getAnalysis<SynchPointDelim>();
+            VERBOSE_PRINT("Setting up nDRF regions\n");
             setupNDRFRegions(syncdelimited);
-            //calculate enclaveness
             printInfo();
+            printnDRFRegionGraph(M);
+            AliasAnalysis &aa = getAnalysis<AliasAnalysis>();
+            aacombined = new AliasCombiner(&M,true,MustAlias);
+            aacombined->addAliasResult(aa);
+            VERBOSE_PRINT("Extending DRF regions across nDRF regions\n");
+            for (nDRFRegion * region : nDRFRegions)
+                if (region->startHere) {
+                    VERBOSE_PRINT("Starting from region: " << region->ID << "\n");
+                    extendDRFRegion(region);
+                }
             return false;
         }
 
@@ -137,6 +170,8 @@ namespace {
             //For now, plainly transfer the info into an nDRF region
             for (CriticalRegion * critRegion : syncdelimited.criticalRegions) {
                 nDRFRegion* newRegion = new nDRFRegion;
+                if (critRegion->firstRegionInEntry)
+                    newRegion->startHere=true;
                 //Setup what nDRF regions synchronize with each other
                 for (SynchronizationVariable* synch :  critRegion->synchsOn) {
                     for (nDRFRegion* synchsWith : nDRFRegionsSynchsOn[synch]) {
@@ -150,10 +185,11 @@ namespace {
                 //also setup preceding and following instructions and nDRF regions
                 for (SynchronizationPoint* entry : critRegion->entrySynchPoints) {
                     newRegion->beginsAt.insert(entry->val);
-                    newRegion->precedingInstructions=entry->getPrecedingInsts();
+                    //newRegion->precedingInstructions=entry->getPrecedingInsts();
                     for (SynchronizationPoint* pred : entry->preceding) {
                         if (pred) {
                             if (regionOfPoint[pred]) {
+                                newRegion->precedingInstructions[regionOfPoint[pred]]=entry->precedingInsts[pred];
                                 newRegion->precedingRegions.insert(regionOfPoint[pred]);
                                 regionOfPoint[pred]->followingRegions.insert(newRegion);
                             }
@@ -162,10 +198,11 @@ namespace {
                 }
                 for (SynchronizationPoint* exit : critRegion->exitSynchPoints) {
                     newRegion->endsAt.insert(exit->val);
-                    newRegion->followingInstructions=exit->getFollowingInsts();
+                    //newRegion->followingInstructions=exit->getFollowingInsts();
                     for (SynchronizationPoint* follow : exit->following) {
                         if (follow) {
                             if (regionOfPoint[follow]) {
+                                newRegion->followingInstructions[regionOfPoint[follow]]=exit->followingInsts[follow];
                                 newRegion->followingRegions.insert(regionOfPoint[follow]);
                                 regionOfPoint[follow]->precedingRegions.insert(newRegion);
                             }
@@ -182,7 +219,11 @@ namespace {
                         newRegion->receivesSignal=true;
                     
                     for (SynchronizationPoint* after : in->following) {
-                        if (critRegion->containedSynchPoints.count(after) != 0) {
+                        if (critRegion->containedSynchPoints.count(after) != 0 &&
+                            //The preceding point being an exit point implies that we should not count instructions between it and
+                            //following regions that are not exit points in this region
+                            (!(critRegion->exitSynchPoints.count(in) != 0) || critRegion->exitSynchPoints.count(after) != 0))
+                            {
                             newRegion->containedInstructions.insert(in->followingInsts[after].begin(),
                                                                     in->followingInsts[after].end());
                         }
@@ -192,12 +233,134 @@ namespace {
             }
         }
 
-        
+        void printnDRFRegionGraph(Module &M) {
+            ofstream outputGraph(graphOutput2.c_str());
+            if (outputGraph.is_open()) {
+                outputGraph << "digraph \"" << (M.getName().data()) << " nDRF Region Graph\" {\n";
+                for (nDRFRegion * region : nDRFRegions) {
+                    for (nDRFRegion * regionTo : region->followingRegions) {
+                        outputGraph << region->ID << " -> " << regionTo->ID << ";\n";
+                    }
+                    if (region->startHere)
+                        outputGraph << "\"Thread Start\" -> " << region->ID << ";\n";
+                }
+                outputGraph << "}\n";
+                outputGraph.close();
+            } else if (graphOutput.compare("") == 0) {
+                VERBOSE_PRINT("Failed to output nDRF region graph\n");
+            }
+        }
 
+
+        //Returns a pair:
+        //first = instructions to check towards
+        //Second = regions that follow us
+        map<nDRFRegion*,pair<SmallPtrSet<Instruction*,64>, SmallPtrSet<nDRFRegion*,2> > > extendDRFRegionDynamic;
+        pair<SmallPtrSet<Instruction*,64>,SmallPtrSet<nDRFRegion*,2> > extendDRFRegion(nDRFRegion *regionToExtend) {
+            if (extendDRFRegionDynamic.count(regionToExtend) != 0)
+                return extendDRFRegionDynamic[regionToExtend];
+
+            //Obtain what to compare against
+            SmallPtrSet<Instruction*,64> toCompareAgainst;
+            SmallPtrSet<nDRFRegion*,2> followingRegions;
+
+            //Handle end of context
+            if (regionToExtend == NULL)
+                return make_pair(toCompareAgainst,followingRegions);
+
+            VERBOSE_PRINT("Handling region " << regionToExtend->ID << "\n");
+
+            //Handle special cases, signals and waits are never xDRF
+            if (regionToExtend->receivesSignal || regionToExtend->sendsSignal)
+                return make_pair(toCompareAgainst,followingRegions);
+
+            //Handles recursive cases
+            extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);
+
+
+            //Obtain the instructions to compare from regions that follow us
+            for (nDRFRegion * region : regionToExtend->followingRegions) {
+                toCompareAgainst.insert(regionToExtend->followingInstructions[regionToExtend].begin(),
+                                        regionToExtend->followingInstructions[regionToExtend].end());
+                followingRegions.insert(region);
+                pair<SmallPtrSet<Instruction*,64>, SmallPtrSet<nDRFRegion*,2> > recursiveCompareAgainst = extendDRFRegion(region);
+                toCompareAgainst.insert(recursiveCompareAgainst.first.begin(),
+                                        recursiveCompareAgainst.first.end());
+                followingRegions.insert(recursiveCompareAgainst.second.begin(),
+                                        recursiveCompareAgainst.second.end());
+            }
+
+            //Obtain the instructions to compare from regions that synch with us
+            for (nDRFRegion * region : regionToExtend->synchsWith) {
+                pair<SmallPtrSet<Instruction*,64>, SmallPtrSet<nDRFRegion*,2> > recursiveCompareAgainst = extendDRFRegion(region);
+                followingRegions.insert(region);
+                toCompareAgainst.insert(recursiveCompareAgainst.first.begin(),
+                                        recursiveCompareAgainst.first.end());
+                followingRegions.insert(recursiveCompareAgainst.second.begin(),
+                                        recursiveCompareAgainst.second.end());
+            }
+
+            // VERBOSE_PRINT("Handling " << regionToExtend->ID << " need to make " << (regionToExtend->getPrecedingInsts().size() * toCompareAgainst.size()) << " + " << (regionToExtend->containedInstructions.size() * (regionToExtend->getPrecedingInsts().size() + toCompareAgainst.size())) << " comparisons (or more)\n");
+            
+            VERBOSE_PRINT("Handling " << regionToExtend->ID << ":\n");
+            VERBOSE_PRINT("  Has " << regionToExtend->getPrecedingInsts().size() << " preceding instructions\n"); 
+            VERBOSE_PRINT("  Contains " << regionToExtend->containedInstructions.size() << " instructions\n");
+            VERBOSE_PRINT("  Must compare against " << toCompareAgainst.size() << " following instructions\n");
+            VERBOSE_PRINT("  And " << followingRegions.size() << " regions\n");
+            bool conflict = false;
+            //Cross-check
+            for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {    
+                for (Instruction * instAfter : toCompareAgainst) {
+                    //Comparing instructions to themselves, in case of loops, is perfectly fine
+                    if (aacombined->MayConflict(instPre,instAfter)) {
+                        regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
+                        conflict=true;
+                    }
+                }
+                //Check our preceding instructions towards the instructions inside the following nDRFs
+                for (nDRFRegion * region : followingRegions) {
+                    for (Instruction * instIn : region->containedInstructions) {
+                        if (aacombined->MayConflict(instPre,instIn)) {
+                            region->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
+                            conflict=true;
+                        }
+                    }
+                }
+            }
+            //Check the instructions within our nDRF towards all previous and following insts
+            for (Instruction * instIn : regionToExtend->containedInstructions) {
+                for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {   
+                    if (aacombined->MayConflict(instPre,instIn)) {
+                        regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(regionToExtend,instIn)));
+                        conflict=true;
+                    }
+                }
+                for (Instruction * instAfter : toCompareAgainst) {   
+                    if (aacombined->MayConflict(instAfter,instIn)) {
+                        regionToExtend->conflictsTowardsDRF.insert(make_pair(instAfter,make_pair(regionToExtend,instIn)));
+                        conflict=true;
+                    }
+                }
+            }
+
+            //If no conflicts are detected by extending over us, make us enclave
+            if (!conflict) {
+                regionToExtend->enclave=true;
+            } else {
+                //Otherwise, the things that follow us are not of interest to our parent
+                toCompareAgainst.clear();
+                followingRegions.clear();
+            }
+
+            return extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);
+        }
+        
         void printInfo() {
             VERBOSE_PRINT("Printing nDRF region info...\n");
             for (nDRFRegion * region : nDRFRegions) {
                 VERBOSE_PRINT("Region " << region->ID << ":\n");
+                if (region->enclave)
+                    VERBOSE_PRINT("Is enclave\n");
                 if (region->receivesSignal)
                     VERBOSE_PRINT("  Receives signals\n");
                 if (region->sendsSignal)
@@ -210,9 +373,11 @@ namespace {
                 for (Instruction * inst : region->endsAt) {
                     VERBOSE_PRINT("   " << *inst << "\n");
                 }
-                VERBOSE_PRINT("  Preceded by " << region->precedingInstructions.size() << " instructions\n");
+                SmallPtrSet<Instruction*,128> precedingInsts = region->getPrecedingInsts();
+                SmallPtrSet<Instruction*,128> followingInsts = region->getFollowingInsts();
+                VERBOSE_PRINT("  Preceded by " << precedingInsts.size() << " instructions\n");
                 VERBOSE_PRINT("  Contains " << region->containedInstructions.size() << " instructions\n");
-                VERBOSE_PRINT("  Followed by " << region->followingInstructions.size() << " instructions\n");
+                VERBOSE_PRINT("  Followed by " << followingInsts.size() << " instructions\n");
                 VERBOSE_PRINT("  Preceded by the nDRF regions:\n");
                 for (nDRFRegion * pred : region->precedingRegions) {
                         VERBOSE_PRINT("   " << pred->ID << "\n");
