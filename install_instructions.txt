@@ -1,0 +1,61 @@
+1. Install LLVM 3.7.0
+  1a. Download source code
+    LLVM core     (http://llvm.org/releases/3.7.0/llvm-3.7.0.src.tar.xz)
+    Clang         (http://llvm.org/releases/3.7.0/cfe-3.7.0.src.tar.xz)
+    compiler-RT   (http://llvm.org/releases/3.7.0/compiler-rt-3.7.0.src.tar.xz)
+
+  1b. Untar and place code
+    tar xvf llvm-3.7.0.src.tar.xz
+    tar xvf cfe-3.7.0.src.tar.xz
+    tar xvf compiler-rt-3.7.0.src.tar.xz
+    mv llvm-3.7.0.src <llvm-prefix>/llvm-3.7.0-src
+    mv cfe-3.7.0.src <llvm-prefix>/llvm-3.7.0-src/tools/clang
+    mv compiler-rt-3.7.0.src <llvm-prefix>/llvm-3.7.0-src/projects/compiler-rt
+
+  1c. Build and install
+    mkdir <llvm-prefix>/llvm-3.7.0-build
+    cd <llvm-prefix>/llvm-3.7.0-build
+    cmake -DCMAKE_INSTALL_PREFIX=<llvm-prefix>/llvm-3.7.0-install \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_RTTI=ON \
+          ../llvm-3.7.0-src
+    cmake --build .
+    cmake --build . --target install
+
+    Note: If gmake is the underlying make system (usually default on Linux)
+          you may want to replace "cmake --build ." with "cmake --build . -- -j 4".
+          This will send the "-j 4" flag to gmake telling it to run 4 jobs simultaneously.
+
+
+2. Build xDRF pass
+  2a. Place the content of the directory this file is in in a directory called 'xDRF-src'. Or otherwise
+    pretend that 'xDRF-src' is replaced by whatever the directory is currently called. We'll use
+    <xDRF-prefix> to refer to the directory containing 'xDRF-src'.
+
+  2b. Build and install
+    mkdir <xDRF-prefix>/xDRF-build
+    cd <xDRF-prefix>/xDRF-build
+    cmake -DLLVM_DIR=<llvm-prefix>/llvm-3.7.0-install/share/llvm/cmake ../xDRF-src
+    cmake --build .
+
+  2c. Locate pass binary
+    The built pass resides in <xDRF-prefix>/xDRF-build/XDRFExtension/XDRFExtension.so
+
+3. Running the pass
+  3a. For now, include the entire file <xDRF-prefix>/xDRF-src/XDRFExtension/XDRFExtension.cpp
+    into your own program/pass. Later, there will instead be a more light-weight header file to include that ensures
+    you do not need to re-compile XDRFExtension together with your program.
+  
+  3b. Require the pass in your program/pass, by specifying  "AnalysisUsage.addRequired<XDRFExtension>()" in your
+    analysis usage.
+
+  3c. Obtain the results by executing "XDRFExtension &xdrfextended  = getAnalysis<XDRFExtension>();". This will give
+    you an "XDRFExtension" object to access the results from.
+
+  3d. Interface towards the "nDRFRegions" structure in the "XDRFExtension" object. See the documentation in
+    <xDRF-prefix>/xDRF-src/XDRFExtension/XDRFExtension.cpp to see how this works. Currently there are no methods to
+    reason about the extent of xDRF regions, later there might be added methods that for example find the xDRF region
+    of a particular instruction or determine whether two instructions are within the same xDRF regions. Feel free to come
+    with suggestions.
+
