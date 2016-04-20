@@ -904,18 +904,18 @@ namespace {
                     VERBOSE_PRINT("is FROM in a one-way synchronization\n");
                 if (synchPoint->isOnewayTo)
                     VERBOSE_PRINT("is TO in a one-way synchronization\n");
-                // VERBOSE_PRINT("Preceding:\n");
-                // for (SynchronizationPoint* precedingPoint : synchPoint->preceding) {
-                //     if (precedingPoint) {
-                //         VERBOSE_PRINT("ID: " << precedingPoint->ID << "\n");
-                //     } else {
-                //         VERBOSE_PRINT("Context start\n");
-                //     }
-                //     for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
-                //              et=synchPoint->precedingInsts[precedingPoint].end();
-                //          it != et; ++it)
-                //         DEBUG_PRINT(**it << "\n");
-                // }
+                VERBOSE_PRINT("Preceding:\n");
+                for (SynchronizationPoint* precedingPoint : synchPoint->preceding) {
+                    if (precedingPoint) {
+                        VERBOSE_PRINT("ID: " << precedingPoint->ID << "\n");
+                    } else {
+                        VERBOSE_PRINT("Context start\n");
+                    }
+                    for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
+                             et=synchPoint->precedingInsts[precedingPoint].end();
+                         it != et; ++it)
+                        DEBUG_PRINT(**it << "\n");
+                }
                 VERBOSE_PRINT("Following:\n");
                 for (SynchronizationPoint* followingPoint : synchPoint->following) {
                     if (followingPoint) {
