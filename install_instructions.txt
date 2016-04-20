@@ -50,10 +50,12 @@
   3b. Require the pass in your program/pass, by specifying  "AnalysisUsage.addRequired<XDRFExtension>()" in your
     analysis usage.
 
-  3c. Obtain the results by executing "XDRFExtension &xdrfextended  = getAnalysis<XDRFExtension>();". This will give
+  3c. Run the pass together with your pass with opt, by specifying "opt -load <xDRF-prefix>/xDRF-build/XDRFExtension/XDRFExtension.so -SPDelim -XDRFextend <your stuff here>"
+
+  3d. Obtain the results by executing "XDRFExtension &xdrfextended  = getAnalysis<XDRFExtension>();". This will give
     you an "XDRFExtension" object to access the results from.
 
-  3d. Interface towards the "nDRFRegions" structure in the "XDRFExtension" object. See the documentation in
+  3e. Interface towards the "nDRFRegions" structure in the "XDRFExtension" object. See the documentation in
     <xDRF-prefix>/xDRF-src/XDRFExtension/XDRFExtension.cpp to see how this works. Currently there are no methods to
     reason about the extent of xDRF regions, later there might be added methods that for example find the xDRF region
     of a particular instruction or determine whether two instructions are within the same xDRF regions. Feel free to come
