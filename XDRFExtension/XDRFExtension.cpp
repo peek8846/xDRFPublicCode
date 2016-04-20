@@ -170,6 +170,7 @@ namespace {
             //For now, plainly transfer the info into an nDRF region
             for (CriticalRegion * critRegion : syncdelimited.criticalRegions) {
                 nDRFRegion* newRegion = new nDRFRegion;
+                
                 if (critRegion->firstRegionInEntry)
                     newRegion->startHere=true;
                 //Setup what nDRF regions synchronize with each other
@@ -188,11 +189,17 @@ namespace {
                     //newRegion->precedingInstructions=entry->getPrecedingInsts();
                     for (SynchronizationPoint* pred : entry->preceding) {
                         if (pred) {
-                            if (regionOfPoint[pred]) {
-                                newRegion->precedingInstructions[regionOfPoint[pred]]=entry->precedingInsts[pred];
-                                newRegion->precedingRegions.insert(regionOfPoint[pred]);
-                                regionOfPoint[pred]->followingRegions.insert(newRegion);
+                            nDRFRegion *regofpoint=regionOfPoint[pred];
+                            if (regofpoint) {
+                                newRegion->precedingInstructions[regofpoint].insert(entry->precedingInsts[pred].begin(),
+                                                                                    entry->precedingInsts[pred].end());
+                                newRegion->precedingRegions.insert(regofpoint);
+                                regofpoint->followingRegions.insert(newRegion);
                             }
+                        } else {
+                            newRegion->precedingInstructions[NULL].insert(entry->precedingInsts[NULL].begin(),
+                                                                          entry->precedingInsts[NULL].end());
+                            newRegion->precedingRegions.insert(NULL);
                         }
                     }
                 }
@@ -201,11 +208,17 @@ namespace {
                     //newRegion->followingInstructions=exit->getFollowingInsts();
                     for (SynchronizationPoint* follow : exit->following) {
                         if (follow) {
-                            if (regionOfPoint[follow]) {
-                                newRegion->followingInstructions[regionOfPoint[follow]]=exit->followingInsts[follow];
-                                newRegion->followingRegions.insert(regionOfPoint[follow]);
-                                regionOfPoint[follow]->precedingRegions.insert(newRegion);
+                            nDRFRegion *regofpoint=regionOfPoint[follow];
+                            if (regofpoint) {
+                                newRegion->followingInstructions[regofpoint].insert(exit->followingInsts[follow].begin(),
+                                                                                    exit->followingInsts[follow].end());
+                                newRegion->followingRegions.insert(regofpoint);
+                                regofpoint->precedingRegions.insert(newRegion);
                             }
+                        } else {
+                            newRegion->followingInstructions[NULL].insert(exit->followingInsts[NULL].begin(),
+                                                                          exit->followingInsts[NULL].end());
+                            newRegion->followingRegions.insert(NULL);
                         }
                     }
                 }
@@ -239,7 +252,10 @@ namespace {
                 outputGraph << "digraph \"" << (M.getName().data()) << " nDRF Region Graph\" {\n";
                 for (nDRFRegion * region : nDRFRegions) {
                     for (nDRFRegion * regionTo : region->followingRegions) {
-                        outputGraph << region->ID << " -> " << regionTo->ID << ";\n";
+                        if (regionTo)
+                            outputGraph << region->ID << " -> " << regionTo->ID << ";\n";
+                        else
+                            outputGraph << "\"Thread End\" -> " << regionTo->ID << ";\n";
                     }
                     if (region->startHere)
                         outputGraph << "\"Thread Start\" -> " << region->ID << ";\n";
@@ -271,8 +287,10 @@ namespace {
             VERBOSE_PRINT("Handling region " << regionToExtend->ID << "\n");
 
             //Handle special cases, signals and waits are never xDRF
-            if (regionToExtend->receivesSignal || regionToExtend->sendsSignal)
+            if (regionToExtend->receivesSignal || regionToExtend->sendsSignal) {
+                regionToExtend->enclave=false;
                 return make_pair(toCompareAgainst,followingRegions);
+            }
 
             //Handles recursive cases
             extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);
@@ -319,10 +337,12 @@ namespace {
                 }
                 //Check our preceding instructions towards the instructions inside the following nDRFs
                 for (nDRFRegion * region : followingRegions) {
-                    for (Instruction * instIn : region->containedInstructions) {
-                        if (aacombined->MayConflict(instPre,instIn)) {
-                            region->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
-                            conflict=true;
+                    if (region) {
+                        for (Instruction * instIn : region->containedInstructions) {
+                            if (aacombined->MayConflict(instPre,instIn)) {
+                                region->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
+                                conflict=true;
+                            }
                         }
                     }
                 }
@@ -347,6 +367,7 @@ namespace {
             if (!conflict) {
                 regionToExtend->enclave=true;
             } else {
+                regionToExtend->enclave=false;
                 //Otherwise, the things that follow us are not of interest to our parent
                 toCompareAgainst.clear();
                 followingRegions.clear();
@@ -361,6 +382,8 @@ namespace {
                 VERBOSE_PRINT("Region " << region->ID << ":\n");
                 if (region->enclave)
                     VERBOSE_PRINT("Is enclave\n");
+                else
+                    VERBOSE_PRINT("Is not enclave\n");
                 if (region->receivesSignal)
                     VERBOSE_PRINT("  Receives signals\n");
                 if (region->sendsSignal)
@@ -380,11 +403,17 @@ namespace {
                 VERBOSE_PRINT("  Followed by " << followingInsts.size() << " instructions\n");
                 VERBOSE_PRINT("  Preceded by the nDRF regions:\n");
                 for (nDRFRegion * pred : region->precedingRegions) {
+                    if (pred)
                         VERBOSE_PRINT("   " << pred->ID << "\n");
+                    else
+                        VERBOSE_PRINT("   Thread Entry\n");
                 }
                 VERBOSE_PRINT("  Followed by the nDRF regions:\n");
                 for (nDRFRegion * follow : region->followingRegions) {
+                    if (follow)
                         VERBOSE_PRINT("   " << follow->ID << "\n");
+                    else
+                        VERBOSE_PRINT("   Thread Entry\n");
                 }
             }
         }
