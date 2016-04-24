@@ -412,9 +412,8 @@ namespace {
                                        //vector<State> *firstReachable,
                                        Function *addFirstToFun,
                                        set<CallSite> &noRecurseSet) {
-            //map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > dummy;
-            SmallPtrSet<Instruction*,64> dummy1;
-            SmallPtrSet<BasicBlock*,64> dummy2;
+            map<BasicBlock*,SmallPtrSet<Instruction*,64> > dummy1;
+            map<BasicBlock*,SmallPtrSet<BasicBlock*,64> > dummy2;
             return delimitFromBlock(curr,states,addFirstToFun,noRecurseSet,
                                     SmallPtrSet<BasicBlock*,64>(),
                                     dummy1,dummy2);
@@ -439,15 +438,15 @@ namespace {
                                        Function* addFirstToFun,
                                        set<CallSite> &noRecurseSet,
                                        SmallPtrSet<BasicBlock*,64> previousBlocks,
-                                       SmallPtrSet<Instruction*,64> &backAddedInsts,
-                                       SmallPtrSet<BasicBlock*,64> &backAddedBlocks) {
+                                       map<BasicBlock*,SmallPtrSet<Instruction*,64> > &backAddedInsts,
+                                       map<BasicBlock*,SmallPtrSet<BasicBlock*,64> > &backAddedBlocks) {
             //DEBUG_PRINT("Started a new search branch from BasicBlock: "<< curr->getName() << "\n");
 
             states=unifyRedundantStates(states);
 
-            SmallPtrSet<Instruction*,64> backAddedInstsLocal;
-            SmallPtrSet<BasicBlock*,64> backAddedBlocksLocal;
-
+            map<BasicBlock*,SmallPtrSet<Instruction*,64> > backAddedInstsLocal;
+            map<BasicBlock*,SmallPtrSet<BasicBlock*,64> > backAddedBlocksLocal;
+            
             //This is the set of states of sub-branches that we need to keep
             //track of. These will be returned together with the states
             //obtained in the current search once we return
@@ -468,29 +467,35 @@ namespace {
                 //     else
                 //         DEBUG_PRINT("  context begin\n");
 
-                // DEBUG_PRINT("States are:\n");
-                // for (State state : states) {
-                //     if (state.lastSynch != NULL) {
-                //         DEBUG_PRINT("  From synchpoint " << state.lastSynch->ID << "\n");
-                //     } else {
-                //         DEBUG_PRINT("  From context begin\n");
-                //     }
-                //     for (Instruction * inst : state.precedingInstructions) {
-                //         DEBUG_PRINT("   " << *inst << "\n");
-                //     }
-                // }
+                DEBUG_PRINT("States are:\n");
+                for (State state : states) {
+                    if (state.lastSynch != NULL) {
+                        DEBUG_PRINT("  From synchpoint " << state.lastSynch->ID << "\n");
+                    } else {
+                        DEBUG_PRINT("  From context begin\n");
+                    }
+                    DEBUG_PRINT("     " << state.precedingInstructions.size() << " instructions\n");
+                    // for (Instruction * inst : state.precedingInstructions) {
+                    //     DEBUG_PRINT("   " << *inst << "\n");
+                    // }
+                }
                 
                 //If this is true, don't search further
                 bool shortcut=false;
 
                 //Backedge case
                 if (previousBlocks.count(curr) != 0) {
-                    //LIGHT_PRINT("Search stopped in block: " << curr->getName() << " due to backedge\n");
+                    LIGHT_PRINT("Search stopped in block: " << curr->getName() << " due to backedge\n");
                     for (State state : states) {
-                        backAddedInsts.insert(state.precedingInstructions.begin(),
-                                              state.precedingInstructions.end());
+                        auto prev = backAddedInsts[curr];
+                        prev.insert(state.precedingInstructions.begin(),
+                                    state.precedingInstructions.end());
+                        backAddedInsts[curr]=prev;
                     }
-                    backAddedBlocks.insert(previousBlocks.begin(),previousBlocks.end());
+                    auto prev = backAddedBlocks[curr];
+                    prev.insert(previousBlocks.begin(),
+                                previousBlocks.end());
+                    backAddedBlocks[curr]=prev;
                     // //Should not need to return anything extra
                     // curr=NULL;
                     // continue;
@@ -498,7 +503,7 @@ namespace {
                 }
                 //Forward-edge case || Back-edge case across synch points
                 if (visitedBlocks.count(curr) != 0) {
-                    //LIGHT_PRINT("Search stopped in block: " << curr->getName() << " due to forwardedge or backedge across basicblocks\n");
+                    LIGHT_PRINT("Search stopped in block: " << curr->getName() << " due to forwardedge or backedge across basicblocks\n");
                     //We know this path must be completed, thus we simply check
                     //the mapping and find the reverse states from here
 
@@ -583,7 +588,7 @@ namespace {
                             //DEBUG_PRINT("Was not previously visited\n");
                             //If not, create a new synchronization point
                             synchPoint = new SynchronizationPoint;
-                            LIGHT_PRINT("Created synch point ID: " << synchPoint->ID << "\n");
+                            LIGHT_PRINT("Created synch point ID: " << synchPoint->ID << " : " << *currb << "\n");
                             synchPoint->val=currb;
                             synchronizationPoints.insert(synchPoint);
                             SmallPtrSet<Function*,1> calledFuns = getCalledFuns(currb);
@@ -649,10 +654,6 @@ namespace {
                             backAddedInstsLocal.clear();
                             backAddedBlocksLocal.clear();
                             previousBlocks.clear();
-                            // //Don't want to clear previousVisited, so instead
-                            // //create a new one
-                            // map<BasicBlock*,SmallPtrSet<SynchronizationPoint*,2> > visitedBlocks_;
-                            // visitedBlocks=visitedBlocks_;
                         }
                     } else {
                         //If the instruction is a call, figure out which
@@ -765,8 +766,10 @@ namespace {
                         else {
                             //Otherwise, simply add the instruction to the
                             //states we're tracking
-                            for (State &state : states) {
-                                state.precedingInstructions.insert(currb);
+                            if (isa<StoreInst>(currb) || isa<LoadInst>(currb)) {
+                                for (State &state : states) {
+                                    state.precedingInstructions.insert(currb);
+                                }
                             }
                         }
                     }
@@ -798,38 +801,50 @@ namespace {
                                                     states.begin(),states.end());
                         curr=NULL;
                         continue;
-                    } else 
+                    } else {
                         for (;bb != bbe; ++bb) {
-
                             states.insert(states.end(),
                                           speccCaseBackedgeBlocks[curr].begin(),
                                           speccCaseBackedgeBlocks[curr].end());
                             states=unifyRedundantStates(states);
-
                             succ_iterator cheap_tricks = bb;
                             if (++cheap_tricks == bbe) {
                                 curr = *bb;
                                 continue;
                             }
-                            //LIGHT_PRINT("Branching from BB: " << curr->getName() << "\n");
+                            LIGHT_PRINT("Branching from BB: " << curr->getName() << ", previousblocks size is " << previousBlocks.size() << "\n");
                             vector<State> resultStates = delimitFromBlock(*bb,states,addFirstToFun,noRecurseSet,previousBlocks,backAddedInstsLocal,backAddedBlocksLocal);
                             LIGHT_PRINT("Completed a branch from  BB: " << curr->getName() << "\n");
                             //All instructions we got back must be added as preceding to all our current
                             //states, and also our parents
-                            backAddedInsts.insert(backAddedInstsLocal.begin(),
-                                                  backAddedInstsLocal.end());
-                            for (State &state : states) {
-                                state.precedingInstructions.insert(backAddedInstsLocal.begin(),
-                                                                   backAddedInstsLocal.end());
+                            for (auto backadd : backAddedInstsLocal) {
+                                if (previousBlocks.count(backadd.first) != 0) {
+                                    backAddedInsts.insert(backadd);
+                                }
                             }
+
+                            for (State &state : states) {
+                                int totaladded=0;
+                                for (auto backadd : backAddedInsts) {
+                                    totaladded+=backadd.second.size();
+                                    state.precedingInstructions.insert(backadd.second.begin(),
+                                                                       backadd.second.end());
+                                }
+                                DEBUG_PRINT("While handling backaddedinsts, added " << totaladded << " instructions through special backedge cases\n");
+                            }
+
                             finishedSearchStates.insert(finishedSearchStates.end(),
                                                         resultStates.begin(),resultStates.end());
                             //Similarly, all the blocks we got back must be tracked by us and our parents
-                            backAddedBlocks.insert(backAddedBlocksLocal.begin(),
-                                                   backAddedBlocksLocal.end());
-                            previousBlocks.insert(backAddedBlocksLocal.begin(),
-                                                  backAddedBlocksLocal.end());
+                            for (auto backadd : backAddedBlocksLocal) {
+                                if (previousBlocks.count(backadd.first) != 0) {
+                                    backAddedBlocks.insert(backadd);
+                                    previousBlocks.insert(backadd.second.begin(),
+                                                          backadd.second.end());
+                                }
+                            }
                         }
+                    }    
                 }
             }
             // finishedSearchStates.insert(finishedSearchStates.end(),
@@ -907,21 +922,21 @@ namespace {
                 VERBOSE_PRINT("Preceding:\n");
                 for (SynchronizationPoint* precedingPoint : synchPoint->preceding) {
                     if (precedingPoint) {
-                        VERBOSE_PRINT("ID: " << precedingPoint->ID << "\n");
+                        VERBOSE_PRINT("ID: " << precedingPoint->ID << ", " << synchPoint->precedingInsts[precedingPoint].size() << " instructions \n");
                     } else {
-                        VERBOSE_PRINT("Context start\n");
+                        VERBOSE_PRINT("Context start, " << synchPoint->precedingInsts[precedingPoint].size() << " instructions \n");
                     }
-                    for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
-                             et=synchPoint->precedingInsts[precedingPoint].end();
-                         it != et; ++it)
-                        DEBUG_PRINT(**it << "\n");
+                    // for (auto it=synchPoint->precedingInsts[precedingPoint].begin(),
+                    //          et=synchPoint->precedingInsts[precedingPoint].end();
+                    //      it != et; ++it)
+                    //     DEBUG_PRINT(**it << "\n");
                 }
                 VERBOSE_PRINT("Following:\n");
                 for (SynchronizationPoint* followingPoint : synchPoint->following) {
                     if (followingPoint) {
-                        VERBOSE_PRINT("ID: " << followingPoint->ID << "\n");
+                        VERBOSE_PRINT("ID: " << followingPoint->ID << ", " << synchPoint->followingInsts[followingPoint].size() << " instructions\n");
                     } else {
-                        VERBOSE_PRINT("Context end\n");
+                        VERBOSE_PRINT("Context end, " << synchPoint->followingInsts[followingPoint].size() << " instructions\n");
                     }
                     for (auto it=synchPoint->followingInsts[followingPoint].begin(),
                              et=synchPoint->followingInsts[followingPoint].end();
@@ -1577,7 +1592,8 @@ namespace {
                      it != inst_end(fun);
                      ++it) {
                     Instruction *inst = &*it;
-                    toReturn.insert(inst);
+                    if (isa<StoreInst>(inst) || isa<LoadInst>(inst))
+                        toReturn.insert(inst);
                     SmallPtrSet<Function*,1> calledFuns = getCalledFuns(inst);
                     for (Function *cFun : calledFuns) {
                         SmallPtrSet<Instruction*,128> returned = getExecutableInstsProper(cFun,visitedFuns);
