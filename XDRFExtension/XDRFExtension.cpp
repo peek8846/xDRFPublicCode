@@ -52,6 +52,7 @@
 //#include "../Utils/SkelUtils/CallingDAE.cpp"
 //#include "../Utils/SkelUtils/MetadataInfo.h"
 
+#include "llvm/Analysis/Passes.h"
 // #include "llvm/Analysis/LoopInfo.h"
 //#include "llvm/Analysis/CFG.h"
 // #include "llvm/Analysis/AliasAnalysis.h"
@@ -178,13 +179,16 @@ namespace {
     struct XDRFExtension : public ModulePass {
         static char ID;
         XDRFExtension() : ModulePass(ID) {
+            //initializeXDRFExtensionPass(*PassRegistry::getPassRegistry())
         }
 
     public:
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
-            AU.addRequired<AliasAnalysis>();
+            AU.addRequired<AAResultsWrapperPass>();
+            AU.addRequired<AssumptionCacheTracker>();
+            AU.addRequired<TargetLibraryInfoWrapperPass>();
             AU.addRequired<SynchPointDelim>();
-            //Here we would "require" the previous AA pass
+            AU.setPreservesAll();
         }
       
         AliasCombiner *aacombined;
@@ -194,9 +198,9 @@ namespace {
             VERBOSE_PRINT("Setting up nDRF regions\n");
             setupNDRFRegions(syncdelimited);
             printnDRFRegionGraph(M);
-            AliasAnalysis &aa = getAnalysis<AliasAnalysis>();
-            aacombined = new AliasCombiner(&M,true,MustAlias);
-            aacombined->addAliasResult(aa);
+            //Pass &aa = getAnalysis<AAResultsWrapperPass>();
+            aacombined = new AliasCombiner(&M,true,this,MustAlias);
+            //aacombined->addAliasResult(&aa);
             VERBOSE_PRINT("Determining enclaveness of nDRF regions\n");
             for (nDRFRegion * region : nDRFRegions)
                 if (region->startHere) {
@@ -605,14 +609,23 @@ namespace {
             return reg1 != NULL && reg1 == reg2;
         }
     };
-
 }
 
 char XDRFExtension::ID = 0;
+//namespace llvm {
+// INITIALIZE_PASS_BEGIN(XDRFExtension, "XDRFextend",
+//                       "Identifies nDRF and xDRF regions", true, true)
+// INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+// INITIALIZE_PASS_DEPENDENCY(SynchPointDelim)
+// INITIALIZE_PASS_END(XDRFExtension, "XDRFextend",
+//                     "Identifies nDRF and xDRF regions", true, true)
+//}
 static RegisterPass<XDRFExtension> Y("XDRFextend",
 				     "Identifies nDRF and XDRF regions",
 				     true,
 				     true);
+
+
 #endif
 
 /* Local Variables: */

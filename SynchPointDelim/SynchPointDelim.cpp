@@ -54,8 +54,9 @@
 //#include "../Utils/SkelUtils/MetadataInfo.h"
 
 // #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/CFG.h"
-// #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 // #include "llvm/Analysis/TargetLibraryInfo.h"
 // #include "llvm/Analysis/MemoryLocation.h"
 // #include "llvm/Analysis/ScalarEvolution.h"
@@ -121,6 +122,7 @@ namespace {
     struct SynchPointDelim : public ModulePass {
         static char ID;
         SynchPointDelim() : ModulePass(ID) {
+            //initializeSynchPointDelimPass(*PassRegistry::getPassRegistry())
             synchFunctions.insert(critBeginFunctions.begin(),
                                   critBeginFunctions.end());
             synchFunctions.insert(critEndFunctions.begin(),
@@ -143,12 +145,10 @@ namespace {
 
     public:
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
-            //AU.addRequired<DominatorTreeWrapperPass>();
-            AU.addRequired<AliasAnalysis>();
-            //AU.addRequired<ScalarEvolution>();
-            //AU.addRequired<TargetLibraryInfoWrapperPass>();
-            //AU.addRequired<LoopInfoWrapperPass>();
-            //Here we would "require" the previous AA pass
+            AU.addRequired<AAResultsWrapperPass>();
+            AU.addRequired<AssumptionCacheTracker>();
+            AU.addRequired<TargetLibraryInfoWrapperPass>();
+            AU.setPreservesAll();
         }
     
         Module *wM;
@@ -164,11 +164,9 @@ namespace {
             SmallPtrSet<Function*,4> entrypoints;
 
             wM=&M;
-            AliasAnalysis &aa = getAnalysis<AliasAnalysis>();
+            aacombined = new AliasCombiner(&M,true,this,PartialAlias);
+            //aacombined->addAliasResult(&aa);
             
-            aacombined = new AliasCombiner(&M,true,PartialAlias);
-            aacombined->addAliasResult(aa);
-
             //Find what functions use synchronizations, this can optimize searching later
             determineSynchronizedFunctions();
             
@@ -339,7 +337,8 @@ namespace {
                     LIGHT_PRINT("Clearing out the shortcut data structures\n");
                     //Clean out the tracked basicblocks from the visited and shortcircuited sets
                     SmallPtrSet<State*,4> toDelete;
-                    for (Function::iterator block = start->begin(); block != start->end(); ++block) {
+                    for (Function::iterator block_it = start->begin(); block_it != start->end(); ++block_it) {
+                        BasicBlock* block = &*block_it;
                         if (visitedBlocks.count(block) != 0) {
                             for (State *ptr : visitedBlocks[block])
                                 toDelete.insert(ptr);
@@ -551,9 +550,10 @@ namespace {
                 previousBlocks.insert(curr);
 
                 //Analyze the current block
-                for (BasicBlock::iterator currb=curr->begin(),
+                for (BasicBlock::iterator currb_it=curr->begin(),
                          curre=curr->end();
-                     currb != curre; ++currb) {
+                     currb_it != curre; ++currb_it) {
+                    Instruction *currb=&*currb_it;
                     // if (!(allHandledInsts.insert(&*currb).second)) {
                     //     // DEBUG_PRINT("Instruction was: " << *currb << "\nin basic block: " << curr->getName() << "\n");
                     //     assert("Handled the same instruction twice!");
@@ -1603,14 +1603,23 @@ namespace {
             }
             return toReturn;
         }
-    };
+    };    
 }
 
 char SynchPointDelim::ID = 0;
+//namespace llvm {
+// INITIALIZE_PASS_BEGIN(SynchPointDelim, "SPDelim",
+//                       "Identifies synchronization points and critical regions", true, true)
+// INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+// INITIALIZE_PASS_END(SynchPointDelim, "SPDelim",
+//                     "Identifies synchronization points and critical regions", true, true)
+//}
+
 static RegisterPass<SynchPointDelim> X("SPDelim",
                                        "Identify Synch Points and Data Conflicts pass",
                                        true,
                                        true);
+
 #endif
 
 /* Local Variables: */

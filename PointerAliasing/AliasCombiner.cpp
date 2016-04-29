@@ -8,6 +8,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/IR/Module.h"
 
@@ -35,19 +36,21 @@
 class AliasCombiner {
   
 public:
-    AliasCombiner(Module *mod) {
-        AliasCombiner(mod,false);
+    AliasCombiner(Module *mod, Pass *callingPass) {
+        AliasCombiner(mod,false,callingPass);
     }
 
-    AliasCombiner(Module *mod, bool useUseChain) {
+    AliasCombiner(Module *mod, bool useUseChain, Pass *callingPass) {
         module=mod;
         useUseChainAliasing=useUseChain;
+        this->callingPass=callingPass;
     }
 
-    AliasCombiner(Module *mod, bool useUseChain, AliasResult aliasLevel) {
+    AliasCombiner(Module *mod, bool useUseChain, Pass *callingPass, AliasResult aliasLevel) {
         module=mod;
         useUseChainAliasing=useUseChain;
         willAliasLevel=aliasLevel;
+        this->callingPass=callingPass;
     }
 
     //If any alias analysis says they do not alias, this returns false. Otherwise returns true.
@@ -81,32 +84,52 @@ public:
                             DEBUG_PRINT("Failed to find comparable values\n");
                             continue;
                         }
-                        DEBUG_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
+                        
+                        Function * parent = NULL;
+                        if (Instruction * inst = dyn_cast<Instruction>(P1a)) {
+                            parent=inst->getParent()->getParent();
+                        }
+                        if (Argument * inst = dyn_cast<Argument>(P1a)) {
+                            parent=inst->getParent();
+                        }
+                        if (Instruction * inst = dyn_cast<Instruction>(P2a)) {
+                            parent=inst->getParent()->getParent();
+                        }
+                        if (Argument * inst = dyn_cast<Argument>(P2a)) {
+                            parent=inst->getParent();
+                        }
+
+                        if (parent == NULL)
+                            continue;
+                        LIGHT_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
+                        LIGHT_PRINT("Which have types: " << typeid(*comparable.first).name() << " and " << typeid(*comparable.second).name() << "\n");
                         bool aliased=false;
-                        for (AliasAnalysis aa : aliasResults) {
-                            //                            bool aliased=false;
-                            switch (aa.alias(comparable.first,comparable.second)) {
-                                DEBUG_PRINT("Got NoAlias\n");
-                                if (willAliasLevel > NoAlias) {
-                                    break;
-                                }
-                            case MayAlias:
-                                DEBUG_PRINT("Got MayAlias\n");
-                                if (willAliasLevel > MayAlias) {
-                                    break;
-                                }
-                            case PartialAlias:
-                                DEBUG_PRINT("Got PartialAlias\n");
-                                if (willAliasLevel > PartialAlias) {
-                                    break;
-                                }
-                            case MustAlias:
-                                DEBUG_PRINT("Got MustAlias\n");
-                            default:
-                                aliased=true;
+                        //for (Pass *aa : aliasResults) {
+                            //bool aliased=false;
+                        AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
+                        DEBUG_PRINT("done calling alias\n");
+                        switch (res) {
+                            DEBUG_PRINT("Got NoAlias\n");
+                            if (willAliasLevel > NoAlias) {
                                 break;
                             }
+                        case MayAlias:
+                            DEBUG_PRINT("Got MayAlias\n");
+                            if (willAliasLevel > MayAlias) {
+                                break;
+                            }
+                        case PartialAlias:
+                            DEBUG_PRINT("Got PartialAlias\n");
+                            if (willAliasLevel > PartialAlias) {
+                                break;
+                            }
+                        case MustAlias:
+                            DEBUG_PRINT("Got MustAlias\n");
+                        default:
+                            aliased=true;
+                            break;
                         }
+                        //}
                         if (!aliased) {
                             DEBUG_PRINT("Determined to not alias by LLVM alias analysis\n");
                             toReturn=false;
@@ -130,6 +153,7 @@ public:
                 for (Value *P2a : ptr2args) {
                     if (isa<PointerType>(P2a->getType())) {
                         DEBUG_PRINT("Determining whether " << *P1a << " and " << *P2a << " may conservatively conflict\n");
+
                         if (!(canBeShared(P1a) && canBeShared(P2a))) {
                             DEBUG_PRINT("Determined at least one of them cannot be shared between threads\n");
                             //return false;
@@ -151,31 +175,49 @@ public:
                             DEBUG_PRINT("Failed to find comparable values\n");
                             continue;
                         }
-                        DEBUG_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
+
+                        Function * parent = NULL;
+                        if (Instruction * inst = dyn_cast<Instruction>(P1a)) {
+                            parent=inst->getParent()->getParent();
+                        }
+                        if (Argument * inst = dyn_cast<Argument>(P1a)) {
+                            parent=inst->getParent();
+                        }
+                        if (Instruction * inst = dyn_cast<Instruction>(P2a)) {
+                            parent=inst->getParent()->getParent();
+                        }
+                        if (Argument * inst = dyn_cast<Argument>(P2a)) {
+                            parent=inst->getParent();
+                        }
+                        if (parent == NULL)
+                            continue;
+
+                        LIGHT_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
                         bool aliased=false;
-                        for (AliasAnalysis &aa : aliasResults) {
-                            switch (aa.alias(comparable.first,comparable.second)) {
-                            case NoAlias:
-                                DEBUG_PRINT("Got NoAlias\n");
-                                if (willAliasLevel > NoAlias) {
-                                    break;
-                                }
-                            case MayAlias:
-                                DEBUG_PRINT("Got MayAlias\n");
-                                if (willAliasLevel > MayAlias) {
-                                    break;
-                                }
-                            case PartialAlias:
-                                DEBUG_PRINT("Got PartialAlias\n");
-                                if (willAliasLevel > PartialAlias) {
-                                    break;
-                                }
-                            case MustAlias:
-                                DEBUG_PRINT("Got MustAlias\n");
-                            default:
-                                aliased=true;
+                        //for (Pass *aa : aliasResults) {
+                        
+                        AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
+                        switch (res) {
+                        case NoAlias:
+                            DEBUG_PRINT("Got NoAlias\n");
+                            if (willAliasLevel > NoAlias) {
                                 break;
                             }
+                        case MayAlias:
+                            DEBUG_PRINT("Got MayAlias\n");
+                            if (willAliasLevel > MayAlias) {
+                                break;
+                            }
+                        case PartialAlias:
+                            DEBUG_PRINT("Got PartialAlias\n");
+                            if (willAliasLevel > PartialAlias) {
+                                break;
+                            }
+                        case MustAlias:
+                            DEBUG_PRINT("Got MustAlias\n");
+                        default:
+                            aliased=true;
+                            break;
                         }
                         if (aliased) {
                             DEBUG_PRINT("Determined to alias by LLVM alias analysis\n");
@@ -190,20 +232,40 @@ public:
         return toReturn;
     }
 
-    void addAliasResult(AliasAnalysis &result) {
-        aliasResults.push_back(result);
-    }
+    // void addAliasResult(Pass *result) {
+    //     aliasResults.push_back(result);
+    // }
 
 private:
 
     Module *module;
+    Pass *callingPass;
 
-    list<AliasAnalysis> aliasResults;
+    // list<Pass*> aliasResults;
+    map<Function*,AAResults*> AAResultMap;
+
+    map<pair<Instruction*,Instruction*>,bool> shortcutConservative;
+    map<pair<Instruction*,Instruction*>,bool> shortcutOptimistic;
+
+    AAResults * getAAResultsForFun(Function* parent) {
+        if (AAResultMap.count(parent) != 0) {
+            return AAResultMap[parent];
+        }
+        BasicAAResult * newbase = new BasicAAResult(createLegacyPMBasicAAResult(*callingPass,*parent));
+        AAResults *newaares = new AAResults(createLegacyPMAAResults(*callingPass,*parent,*newbase));
+        //*newaares=createLegacyPMAAResults(*callingPass,*parent,base);
+        return AAResultMap[parent]=newaares;
+    }
+                                     
+
     bool useUseChainAliasing;
 
     AliasResult willAliasLevel=MustAlias;
 
     pair<Value*,Value*> getComparableValues(Value *val1, Value* val2) {
+        bool foundGlobalForVal1=false;
+        bool foundGlobalForVal2=false;
+        
         SmallPtrSet<Value*,4> compareTowards1;
         SmallPtrSet<Value*,4> compareTowards2;
         SmallPtrSet<Value*,4> expandNext1;
@@ -211,7 +273,7 @@ private:
         expandNext1.insert(val1);
         expandNext2.insert(val2);
         while (expandNext1.size() != 0 || expandNext2.size() != 0) {
-            //DEBUG_PRINT("Expanding next, sizes are: " << expandNext1.size() << " x " << expandNext2.size() << " (" << compareTowards1.size() << ", " << compareTowards2.size() << ")\n");
+            DEBUG_PRINT("Expanding next, sizes are: " << expandNext1.size() << " x " << expandNext2.size() << " (" << compareTowards1.size() << ", " << compareTowards2.size() << ")\n");
             DEBUG_PRINT("Sets are:\n");
             DEBUG_PRINT("EN1:\n");
             for (Value * val : expandNext1)
@@ -233,7 +295,8 @@ private:
                     parent1=val1_a->getParent();
                 for (Value* val2_c : compareTowards2) {
                     if (isa<GlobalValue>(val1_e) || isa<GlobalValue>(val2_c))
-                        return make_pair(val1_e,val2_c);
+                        if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_c)))
+                            return make_pair(val1_e,val2_c);
                     Function *parent2=NULL;
                     if (Instruction *val2_i = dyn_cast<Instruction>(val2_c))
                         parent2=val2_i->getParent()->getParent();
@@ -244,7 +307,8 @@ private:
                 }
                 for (Value* val2_e : expandNext2) {
                     if (isa<GlobalValue>(val1_e) || isa<GlobalValue>(val2_e))
-                        return make_pair(val1_e,val2_e);
+                        if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_e)))
+                            return make_pair(val1_e,val2_e);
                     Function *parent2=NULL;
                     if (Instruction *val2_i = dyn_cast<Instruction>(val2_e))
                         parent2=val2_i->getParent()->getParent();
@@ -263,7 +327,8 @@ private:
                     parent2=val2_a->getParent();
                 for (Value* val1_c : compareTowards1) {
                     if (isa<GlobalValue>(val1_c) || isa<GlobalValue>(val2_e))
-                        return make_pair(val1_c,val2_e);
+                        if (!(isa<GlobalValue>(val1_c) && isa<GlobalValue>(val2_e)))
+                            return make_pair(val1_c,val2_e);
                     Function *parent1=NULL;
                     if (Instruction *val1_i = dyn_cast<Instruction>(val1_c))
                         parent2=val1_i->getParent()->getParent();
@@ -288,7 +353,7 @@ private:
                 bool canGetOutsideContext=false;
                 SmallPtrSet<Value*,2> oContext;
                 if (auto val1_i = dyn_cast<Instruction>(val1_e)) {
-                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val1_i);
+                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val1_i,foundGlobalForVal1);
                     canGetOutsideContext=true;
                 }
                 if (auto val1_a = dyn_cast<Argument>(val1_e)) {
@@ -310,7 +375,7 @@ private:
                 bool canGetOutsideContext=false;
                 SmallPtrSet<Value*,2> oContext;
                 if (auto val2_i = dyn_cast<Instruction>(val2_e)) {	
-                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val2_i);
+                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val2_i,foundGlobalForVal2);
                     canGetOutsideContext=true;
                 }
                 if (auto val2_a = dyn_cast<Argument>(val2_e)) {	
@@ -343,38 +408,41 @@ private:
         //     }
         //     return toReturn;
         // } else {
-            bool toReturn=true;
-            for (AliasAnalysis &results : aliasResults) {
-                bool aliased=false;
-                switch (results.alias(ptr1,ptr2)) {
-                case NoAlias:
-                    //                    if (willAliasLevel > NoAlias) {
-                        break;
-                        //}
-                case MayAlias:
-                    //if (willAliasLevel > MayAlias) {
-                    //break;
-                        //}
-                case PartialAlias:
-                    // if (willAliasLevel > PartialAlias) {
-                    //     break;
-                    // }
-                case MustAlias:
-                default:
-                    aliased=true;
-                    break;
-                }
-                if (!aliased) {
-                    toReturn=false;
-                    break;
-                }
-            }
-            // if (toReturn) {
-            //     DEBUG_PRINT("They did\n");    
-            // } else {
-            //     DEBUG_PRINT("They did not\n");    
+        bool toReturn=true;
+        //for (Pass *results : aliasResults) {
+        bool aliased=false;
+        Function * parent = dyn_cast<Instruction>(ptr1)->getParent()->getParent();
+        DEBUG_PRINT("Done calling alias\n");
+        AliasResult res = getAAResultsForFun(parent)->alias(ptr1,ptr2); 
+        switch (res) {
+        case NoAlias:
+            //                    if (willAliasLevel > NoAlias) {
+            break;
+            //}
+        case MayAlias:
+            //if (willAliasLevel > MayAlias) {
+            //break;
+            //}
+        case PartialAlias:
+            // if (willAliasLevel > PartialAlias) {
+            //     break;
             // }
-            return toReturn;
+        case MustAlias:
+        default:
+            aliased=true;
+            break;
+        }
+        DEBUG_PRINT("Done with switch...\n");
+        if (!aliased) {
+            toReturn=false;
+        }
+        //}
+        if (toReturn) {
+            DEBUG_PRINT("They did\n");    
+        } else {
+            DEBUG_PRINT("They did not\n");    
+        }
+        return toReturn;
             //}
     }
 
@@ -405,7 +473,7 @@ private:
         return toReturn;
     }
 
-    SmallPtrSet<Value*,2> getAliasedValuesOutsideContext(Instruction *val) {
+    SmallPtrSet<Value*,2> getAliasedValuesOutsideContext(Instruction *val,bool &comparetoglobsalready) {
         SmallPtrSet<Value*,2> toReturn;
         for (Argument &arg : val->getParent()->getParent()->getArgumentList()) {
             if (isa<PointerType>(arg.getType()) && mayConflictSameContext(val,&arg)) {
@@ -419,9 +487,12 @@ private:
                 }
             }
         }
-        for (GlobalValue &glob : module->getGlobalList()) {
-            if (isa<PointerType>(glob.getType()) && mayConflictSameContext(val,&glob)) {
-                toReturn.insert(&glob);
+        if (comparetoglobsalready) {
+            for (GlobalValue &glob : module->getGlobalList()) {
+                if (isa<PointerType>(glob.getType()) && mayConflictSameContext(val,&glob)) {
+                    toReturn.insert(&glob);
+                    comparetoglobsalready=true;
+                }
             }
         }
         return toReturn;
