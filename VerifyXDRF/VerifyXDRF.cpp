@@ -210,8 +210,8 @@ namespace {
             setIndentLevel(2);
             PRINT_VERIFY("Unaligned enclave begin_ndrf: " << unalignedENCAcq);
             PRINT_VERIFY("Unaligned enclave end_ndrf: " << unalignedENCRel);
-            PRINT_VERIFY("Unaligned non-enclave begin_ndrf: " << unalignedENCAcq);
-            PRINT_VERIFY("Unaligned non-enclave end_ndrf: " << unalignedENCRel);
+            PRINT_VERIFY("Unaligned non-enclave begin_ndrf: " << unalignedNENCAcq);
+            PRINT_VERIFY("Unaligned non-enclave end_ndrf: " << unalignedNENCRel);
             PRINT_VERIFY("Unaligned non-enclave RMS acq: " << unalignedRMSNENCAcq);
             PRINT_VERIFY("Unaligned non-enclave RMS rel: " << unalignedRMSNENCRel);
             PRINT_VERIFY("Unaligned enclave RMS acq: " << unalignedRMSENCAcq);
@@ -324,9 +324,9 @@ namespace {
                     bool correct = false;
                     
                     //Check for the possible surrounding RMS calls
-                    //Check the instructions WITHIN this block before the xDRF call
-                    for (BasicBlock::iterator iter = prevInst->getParent()->begin();
-                         iter != prevInst->getParent()->end(); ++iter) {
+                    //Check the instructions within this block before the xDRF call
+                    for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
+                         iter != prevInst->getParent()->rend(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards initial acquire
                             if (call2->getCalledValue()->stripPointerCasts() == RMSIAcq) {
@@ -364,6 +364,7 @@ namespace {
                         else
                             unalignedNENCAcq++;
                     }
+                    //VERBOSE_VERIFY((*call) << " - marked: " << (xDRF ? "enclave" : "non-enclave") << " aligned: " << (aligned ? "true" : "false") << " correct: " << (correct ? "true" : "false") << "\n");
                 }
             }
         }
@@ -372,15 +373,15 @@ namespace {
             
             for (User *use : eNDRF->users()) {
                 if (auto call = dyn_cast<CallInst>(use)) {
-                    
+                    //DEBUG_VERIFY("Checking " << *call << "\n");
+                    //DEBUG_VERIFY("BB is " << *(call->getParent()) << "\n");
                     // Figure out if the xDRF pass marks it as xDRF or not.
                     bool xDRF = true;
                     BasicBlock::iterator prevInst = BasicBlock::iterator(call);
                     try {
                         moveIteratorDown(prevInst);
                         if (isa<CallInst>(prevInst) &&
-                            (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == eXDRF) {
-                            moveIteratorDown(prevInst);
+                            (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == bXDRF) {
                             xDRF = false;
                         }
                         moveIteratorUp(prevInst);
@@ -395,9 +396,10 @@ namespace {
                     bool aligned=false;
                     bool correct=false;
 
-                    //Check the instructions WITHIN this block before the xDRF call
-                    for (BasicBlock::reverse_iterator iter = prevInst->getParent()->rbegin();
+                    //Check the instructions WITHIN this block before the xDRF call for initial_acquire
+                    for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
                          iter != prevInst->getParent()->rend(); ++iter) {
+                        //DEBUG_VERIFY("Checking towards " << *iter << "\n");
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards initial release
                             if (call2->getCalledValue()->stripPointerCasts() == RMSIRel) {
@@ -408,11 +410,21 @@ namespace {
                                     correct=xDRF;
                                 break;
                             }
-                            //Match towards final barrier
-                            if (call2->getCalledValue()->stripPointerCasts() == RMSFBar) {
-                                aligned = true;
-                                correct=!xDRF;
-                                break;
+                        }
+                    }
+
+                    if (!aligned)  {
+                        //Check the instructions WITHIN this block after the xDRF call for final_barrier
+                        for (BasicBlock::iterator iter = BasicBlock::iterator(prevInst);
+                             iter != prevInst->getParent()->end(); ++iter) {
+                            //DEBUG_VERIFY("Checking towards " << *iter << "\n");
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards final barrier
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSFBar) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -420,21 +432,22 @@ namespace {
                     if (aligned) {
                         if (correct) {
                             if (xDRF)
-                                correctENCAcq++;
+                                correctENCRel++;
                             else
-                                correctNENCAcq++;
+                                correctNENCRel++;
                         } else {
                             if (xDRF)
-                                incorrectENCAcq++;
+                                incorrectENCRel++;
                             else
-                                incorrectNENCAcq++;
+                                incorrectNENCRel++;
                         }
                     } else {
                         if (xDRF)
-                            unalignedENCAcq++;
+                            unalignedENCRel++;
                         else
-                            unalignedNENCAcq++;
+                            unalignedNENCRel++;
                     }
+                    //VERBOSE_VERIFY((*call) << " - marked: " << (xDRF ? "enclave" : "non-enclave") << " aligned: " << (aligned ? "true" : "false") << " correct: " << (correct ? "true" : "false") << "\n");
                 }
             }
         }
@@ -449,8 +462,8 @@ namespace {
                     bool marked = false;
 
 
-                    //Check the instructions WITHIN this block for compiler markings
-                    for (BasicBlock::iterator iter = call->getParent()->begin();
+                    //Check the instructions WITHIN this block after the marking for compiler markings
+                    for (BasicBlock::iterator iter = BasicBlock::iterator(call);
                          iter != call->getParent()->end(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards begin_ndrf
@@ -484,9 +497,9 @@ namespace {
                     bool marked = false;
 
 
-                    //Check the instructions WITHIN this block for compiler markings
-                    for (BasicBlock::reverse_iterator iter = call->getParent()->rbegin();
-                         iter != call->getParent()->rend(); ++iter) {
+                    //Check the instructions WITHIN this block after the marking for compiler markings
+                    for (BasicBlock::iterator iter = BasicBlock::iterator(call);
+                         iter != call->getParent()->end(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards end_ndrf
                             if (call2->getCalledValue()->stripPointerCasts() == eNDRF) {
@@ -516,8 +529,8 @@ namespace {
 
                     bool marked = false;
 
-                    //Check the instructions WITHIN this block for compiler markings
-                    for (BasicBlock::iterator iter = call->getParent()->begin();
+                    //Check the instructions WITHIN this block after the marking for compiler markings
+                    for (BasicBlock::iterator iter = BasicBlock::iterator(call);
                          iter != call->getParent()->end(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards begin_ndrf
@@ -544,7 +557,7 @@ namespace {
                     bool marked = false;
 
                     //Check the instructions WITHIN this block for compiler markings
-                    for (BasicBlock::reverse_iterator iter = call->getParent()->rbegin();
+                    for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(BasicBlock::iterator(call));
                          iter != call->getParent()->rend(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards begin_ndrf
