@@ -494,6 +494,10 @@ namespace {
                     else
                         VERBOSE_PRINT("   Thread Entry\n");
                 }
+                VERBOSE_PRINT("  Conflicts across region:\n");
+                for (pair<Instruction*,Instruction*> conflict : region->conflictsBetweenDRF) {
+                    VERBOSE_PRINT("    " << *(conflict.first) << " conflicts with " << *(conflict.second) << "\n");
+                }
             }
             VERBOSE_PRINT("Printing xDRF region info...\n");
             for (xDRFRegion * region : xDRFRegions) {
