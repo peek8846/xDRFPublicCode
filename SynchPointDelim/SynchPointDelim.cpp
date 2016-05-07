@@ -95,14 +95,22 @@ static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for sy
 namespace {
 
     //These are the functions that start critical regions:
-    set<StringRef> critBeginFunctions = {"pthread_mutex_lock"};
+    set<StringRef> critBeginFunctions = {"pthread_mutex_lock","sem_post","sem_wait","pthread_join"};
     //These are the functions that end critical regions:
-    set<StringRef> critEndFunctions = {"pthread_mutex_unlock"};
+    set<StringRef> critEndFunctions = {"pthread_mutex_unlock","sem_post","sem_wait","pthread_join"};
     //These are the functions that are 'from' in a one-way synchronization:
     set<StringRef> onewayFromFunctions = {"pthread_cond_signal",
-                                          "pthread_cond_broadcast"};
+                                          "pthread_cond_broadcast",
+                                          "sem_post",
+                                          "pthread_create",
+                                          "pthread_join"};
     //These are the functions that are 'to' in a one-way synchronization:
-    set<StringRef> onewayToFunctions = {"pthread_cond_wait"};
+    set<StringRef> onewayToFunctions = {"pthread_cond_wait",
+                                        "sem_post",
+                                        "pthread_create",
+                                        "pthread_join"};
+
+
 
     //These are the functions to treat as synchronization points;
     set<StringRef> synchFunctions = {};
@@ -1416,6 +1424,13 @@ namespace {
                     newSearchState.searchDepth=1;
                     newSearchState.currRegion=critRegion;
                     newSearchState.acquiresSinceRegionStart.insert(currState.nextPoint);
+                    //Special case, point that both begins and ends a region
+                    if (currState.nextPoint->isCritEnd) {
+                        critRegion->exitSynchPoints.insert(currState.nextPoint);
+                        newSearchState.currRegion=NULL;
+                        newSearchState.searchDepth=0;
+                        newSearchState.acquiresSinceRegionStart.clear();
+                    }
                     for (SynchronizationPoint* synchPoint_ : currState.nextPoint->following) {
                         if (synchPoint_ != currState.nextPoint) {
                             newSearchState.nextPoint=synchPoint_;
