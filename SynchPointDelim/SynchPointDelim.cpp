@@ -92,6 +92,8 @@ using namespace std;
 static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for synchpoint graph"),
                                    cl::value_desc("filename"));
 
+
+
 namespace {
 
     //These are the functions that start critical regions:
@@ -110,7 +112,7 @@ namespace {
                                         "pthread_create",
                                         "pthread_join"};
 
-
+    set<StringRef> startThreadContextFunctions = {"pthread_create"};
 
     //These are the functions to treat as synchronization points;
     set<StringRef> synchFunctions = {};
@@ -139,6 +141,8 @@ namespace {
                                   onewayFromFunctions.end());
             synchFunctions.insert(onewayToFunctions.begin(),
                                   onewayToFunctions.end());
+            synchFunctions.insert(startThreadContextFunctions.begin(),
+                                  startThreadContextFunctions.end());
         }
         
         //Manually free the data structures left over to be used by other passes
@@ -219,6 +223,28 @@ namespace {
             //Determine what synchronization variables we have
             determineSynchronizationVariables();
 
+            //Clean up instructions outside parallel regions
+            for (Function *target : entrypoints) {
+                if (target!=M.getFunction("main"))
+                    for (State funState : delimitFunctionDynamic[target].leadingReverseStates) {
+                        colorSynchPoints(funState.lastSynch);
+                    }
+            }
+
+            // VERBOSE_PRINT("Coloreds:\n");
+            // for (SynchronizationPoint *synchPoint : coloredSynchs) {
+            //     if (synchPoint)
+            //         VERBOSE_PRINT(synchPoint->ID << "\n");
+            // }
+            
+            for (SynchronizationPoint *synchPoint : synchronizationPoints) {
+                SmallPtrSet<Function*,1> calledFuns = getCalledFuns(synchPoint->val);
+                if (anyFunctionNameInSet(calledFuns,startThreadContextFunctions))
+                    colorSynchPoints(synchPoint);
+            }
+
+            cleanSynchPoints();
+            
             //Determine the critical regions we have
             determineCriticalRegions(entrypoints);
 
@@ -247,7 +273,6 @@ namespace {
         // }
 
     private:
-
 
         void clearAnalysisHelpStructures() {
             delimitFunctionDynamic.clear();
@@ -1617,6 +1642,43 @@ namespace {
                 }
             }
             return toReturn;
+        }
+        
+        //We color the synchronization points reachable from some synchronization point that creates threads
+        //or reachable from a function first called by spawned threads
+        SmallPtrSet<SynchronizationPoint*,32> coloredSynchs;
+        void colorSynchPoints(SynchronizationPoint *start) {
+            //Color the starting node
+            if (coloredSynchs.insert(start).second == true) {
+                //If we newly colored this node, recurse into successors
+                if (start != NULL)
+                    for (SynchronizationPoint * follower : start->following)
+                        colorSynchPoints(follower);
+            }
+        }
+
+        //Remove the preceding/following instructions towards synch points that are not colored
+        void cleanSynchPoints() {
+            for (SynchronizationPoint *synchPoint : synchronizationPoints) {
+                for (SynchronizationPoint *pred : synchPoint->preceding) {
+                    if (coloredSynchs.count(pred) == 0 || pred == NULL) {
+                        synchPoint->precedingInsts[pred].clear();
+                        // if (pred)
+                        //     VERBOSE_PRINT("Cleaned instruction from synchpoint " << synchPoint->ID << " to synchpoint " << pred -> ID << "\n");
+                        // else
+                        //     VERBOSE_PRINT("Cleaned instruction from synchpoint " << synchPoint->ID << " to synchpoint context begin\n");
+                    }
+                }
+                for (SynchronizationPoint *follow : synchPoint->following) {
+                    if (coloredSynchs.count(follow) == 0) {
+                        synchPoint->followingInsts[follow].clear();
+                        // if (follow)
+                        //     VERBOSE_PRINT("Cleaned instruction from synchpoint " << synchPoint->ID << " to synchpoint " << follow -> ID << "\n");
+                        // else
+                        //     VERBOSE_PRINT("Cleaned instruction from synchpoint " << synchPoint->ID << " to synchpoint context end\n");
+                    }
+                }
+            }
         }
     };    
 }
