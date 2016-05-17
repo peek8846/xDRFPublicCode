@@ -16,7 +16,7 @@ cd ~/Documents/Projects/MasterEx/xDRF/
 source "$workdir"/xdrf-env.sh
 cd -
 
-cd ~/Documents/Projects/MasterEx/pintool
+cd ~/Documents/Libraries/pin-3.0-76991-gcc-linux/
 source "$workdir"/pin-env.sh
 cd -
 
