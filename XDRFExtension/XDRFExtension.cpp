@@ -85,6 +85,9 @@
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
+//Shorthand for checking whether two accesses conflict
+#define MAYCONFLICT(X,Y) ((isa<StoreInst>(X) || isa<StoreInst>(Y)) && aacombined->MayConflict(X,Y))
+
 using namespace llvm;
 using namespace std;
 
@@ -406,7 +409,7 @@ namespace {
             for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {    
                 for (Instruction * instAfter : toCompareAgainst) {
                     //Comparing instructions to themselves, in case of loops, is perfectly fine
-                    if (aacombined->MayConflict(instPre,instAfter)) {
+                    if (MAYCONFLICT(instPre,instAfter)) {
                         regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
                         conflict=true;
                     }
@@ -415,7 +418,7 @@ namespace {
                 for (nDRFRegion * region : followingRegions) {
                     if (region) {
                         for (Instruction * instIn : region->containedInstructions) {
-                            if (aacombined->MayConflict(instPre,instIn)) {
+                            if (MAYCONFLICT(instPre,instIn)) {
                                 if (!skipConflictStore)
                                     region->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
                                 conflict=true;
@@ -427,14 +430,14 @@ namespace {
             //Check the instructions within our nDRF towards all previous and following insts
             for (Instruction * instIn : regionToExtend->containedInstructions) {
                 for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {   
-                    if (aacombined->MayConflict(instPre,instIn)) {
+                    if (MAYCONFLICT(instPre,instIn)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(regionToExtend,instIn)));
                         conflict=true;
                     }
                 }
                 for (Instruction * instAfter : toCompareAgainst) {   
-                    if (aacombined->MayConflict(instAfter,instIn)) {
+                    if (MAYCONFLICT(instAfter,instIn)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsTowardsDRF.insert(make_pair(instAfter,make_pair(regionToExtend,instIn)));
                         conflict=true;
@@ -527,7 +530,7 @@ namespace {
             inRegion->containedInstructions.insert(predinsts.begin(),
                                                    predinsts.end());
             for (auto xDRFRegion : xDRFRegions) {
-                if (xDRFRegion->followingNDRFs.count(startHere) != 0) {
+                if (xDRFRegion->followingNDRFs.count(startHere) != 0 || xDRFRegion->enclaveNDRFs.count(startHere) != 0) {
                     //Already handled case
                     if (xDRFRegion == inRegion)
                         return;
