@@ -33,5 +33,5 @@ shift
 
 opt -S \
     -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-    -internalize -internalize-public-api-list "main" -O3 $AAs -SPDelim -XDRFextend -MarkXDRF $@\
+    -internalize -internalize-public-api-list "main" -adce -globaldce $AAs -SPDelim -XDRFextend -MarkXDRF $@\
     $targetFile $outputFile
