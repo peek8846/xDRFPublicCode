@@ -15,7 +15,8 @@
 #include <list>
 
 #include "UseChainAliasing.cpp"
-
+// #include "WPA/FlowSensitive.h"
+// #include "MemoryModel/PointerAnalysis.h"
 
 #define LIBRARYNAME "AliasCombiner(class)"
 
@@ -31,8 +32,6 @@
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
-
-
 class AliasCombiner {
   
 public:
@@ -41,9 +40,10 @@ public:
     }
 
     AliasCombiner(Module *mod, bool useUseChain, Pass *callingPass) {
-        module=mod;
-        useUseChainAliasing=useUseChain;
-        this->callingPass=callingPass;
+        // module=mod;
+        // useUseChainAliasing=useUseChain;
+        // this->callingPass=callingPass;
+        AliasCombiner(mod, useUseChain, callingPass, MustAlias);
     }
 
     AliasCombiner(Module *mod, bool useUseChain, Pass *callingPass, AliasResult aliasLevel) {
@@ -51,12 +51,15 @@ public:
         useUseChainAliasing=useUseChain;
         willAliasLevel=aliasLevel;
         this->callingPass=callingPass;
+        //flowSensitive=FlowSensitive::createFSWPA(*mod);
     }
 
     //If any alias analysis says they do not alias, this returns false. Otherwise returns true.
+    //More specifically, if we can for each argument to the instruction find atleast one proof it does not alias
+    //then we're fine
     bool MayConflict(Instruction *ptr1, Instruction *ptr2) {
-        DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n"); 
-        bool toReturn=true;
+        DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
+        bool toReturn=false;
         SmallPtrSet<Value*,4> ptr1args=getArguments(ptr1);
         SmallPtrSet<Value*,4> ptr2args=getArguments(ptr2);
         for (Value *P1a : ptr1args) {
@@ -64,22 +67,25 @@ public:
                 for (Value *P2a : ptr2args) {
                     if (isa<PointerType>(P2a->getType())) {
                         DEBUG_PRINT("Determining whether " << *P1a << " and " << *P2a << " may optimistically conflict\n");
+                            
                         if (!(canBeShared(P1a) && canBeShared(P2a))) {
                             DEBUG_PRINT("Determined at least one of them cannot be shared between threads\n");
-                            toReturn=false;
+                            continue;
                         }
+
                         if (useUseChainAliasing) {
                             DEBUG_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
                             if (pointerAlias(P1a,P2a) == false) {
                                 DEBUG_PRINT("Determined to not alias by use chain analysis\n");
-                                toReturn=false;
+                                continue;
                             }
                             else
                                 DEBUG_PRINT("Was not determined to not alias by usechainaliasing\n");
                         }
+                        
                         pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
-                        //pair<Value*,Value*> comparable = make_pair(P1a,P2a);
+                        //pair<Value*,Value*> comparable=make_pair(P1a,P2a);
                         if (!(comparable.first && comparable.second)) {
                             DEBUG_PRINT("Failed to find comparable values\n");
                             continue;
@@ -107,7 +113,6 @@ public:
                         //for (Pass *aa : aliasResults) {
                             //bool aliased=false;
                         AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
-                        DEBUG_PRINT("done calling alias\n");
                         switch (res) {
                             DEBUG_PRINT("Got NoAlias\n");
                             if (willAliasLevel > NoAlias) {
@@ -129,20 +134,27 @@ public:
                             aliased=true;
                             break;
                         }
-                        //}
                         if (!aliased) {
-                            DEBUG_PRINT("Determined to not alias by LLVM alias analysis\n");
-                            toReturn=false;
+                            LIGHT_PRINT("Determined they did not alias\n");
+                            continue;
+                        } else {
+                            LIGHT_PRINT("Determined that they aliased\n");
+                            return true;
                         }
-                        DEBUG_PRINT("Did not find  any proof of non-aliasing\n");
+                        //}
                     }
                 }
             }
         }
-        return true;
+        return toReturn;
     }
 
+    // bool MustConflict(Instruction *ptr1, Instruction *ptr2) {
+    //     return MayConflict(ptr1,ptr2);
+    // }
+
     //If any alias analysis says they must alias, this returns true. Otherwise returns false
+    //more specifically, for each argument we need to prove it does not alias t return false
     bool MustConflict(Instruction *ptr1, Instruction *ptr2) {
         DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are aliasing under any analysis\n");
         bool toReturn=false;
@@ -156,9 +168,9 @@ public:
 
                         if (!(canBeShared(P1a) && canBeShared(P2a))) {
                             DEBUG_PRINT("Determined at least one of them cannot be shared between threads\n");
-                            //return false;
+                            continue;
                         }
-                        
+
                         if (useUseChainAliasing) {
                             DEBUG_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
@@ -169,7 +181,6 @@ public:
                             else
                                 DEBUG_PRINT("Was not determined to alias by usechainaliasing\n");
                         }
-                        //pair<Value*,Value*> comparable = make_pair(P1a,P2a);
                         pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
                         if (!(comparable.first && comparable.second)) {
                             DEBUG_PRINT("Failed to find comparable values\n");
@@ -221,7 +232,7 @@ public:
                         }
                         if (aliased) {
                             DEBUG_PRINT("Determined to alias by LLVM alias analysis\n");
-                            toReturn=true;
+                            return true;
                         }
                         else
                             DEBUG_PRINT("Did not find any proof of aliasing\n");
@@ -240,6 +251,8 @@ private:
 
     Module *module;
     Pass *callingPass;
+
+    // FlowSensitive *flowSensitive;
 
     // list<Pass*> aliasResults;
     map<Function*,AAResults*> AAResultMap;
@@ -443,7 +456,7 @@ private:
             DEBUG_PRINT("They did not\n");    
         }
         return toReturn;
-            //}
+        //}
     }
 
     SmallPtrSet<Value*,2> getAliasedValuesOutsideContext(Argument *arg) {
@@ -707,8 +720,6 @@ private:
                     args.insert(arg.get());
         return args;
     }
-
-    
 };
     
 #endif
