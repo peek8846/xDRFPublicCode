@@ -165,12 +165,11 @@ namespace {
     
         Module *wM;
     
-        //The main runOnModule function is divided in three parts
+        //The main runOnModule function is divided in two parts
         //The first part finds synchronization points and the drf paths between
         //them
         //The second part determines which synchronization points synch with
         //eachother
-        //The third part finds data conflicts across synchronizations points
         virtual bool runOnModule(Module &M) {
             //Functions that may be the entry point of functions
             SmallPtrSet<Function*,4> entrypoints;
@@ -499,18 +498,18 @@ namespace {
                 //     else
                 //         DEBUG_PRINT("  context begin\n");
 
-                DEBUG_PRINT("States are:\n");
-                for (State state : states) {
-                    if (state.lastSynch != NULL) {
-                        DEBUG_PRINT("  From synchpoint " << state.lastSynch->ID << "\n");
-                    } else {
-                        DEBUG_PRINT("  From context begin\n");
-                    }
-                    DEBUG_PRINT("     " << state.precedingInstructions.size() << " instructions\n");
-                    // for (Instruction * inst : state.precedingInstructions) {
-                    //     DEBUG_PRINT("   " << *inst << "\n");
-                    // }
-                }
+                // DEBUG_PRINT("States are:\n");
+                // for (State state : states) {
+                //     if (state.lastSynch != NULL) {
+                //         DEBUG_PRINT("  From synchpoint " << state.lastSynch->ID << "\n");
+                //     } else {
+                //         DEBUG_PRINT("  From context begin\n");
+                //     }
+                //     DEBUG_PRINT("     " << state.precedingInstructions.size() << " instructions\n");
+                //     // for (Instruction * inst : state.precedingInstructions) {
+                //     //     DEBUG_PRINT("   " << *inst << "\n");
+                //     // }
+                // }
                 
                 //If this is true, don't search further
                 bool shortcut=false;
@@ -693,8 +692,9 @@ namespace {
                         //function it is
                         if (isCallSite(currb)) {
                             SmallPtrSet<Function*,1> calledFuns = getCalledFuns(currb);
-                            //LIGHT_PRINT(calledFuns.size() << " functions could be called\n");
+                            LIGHT_PRINT(calledFuns.size() << " functions could be called\n");
                             for (Function* calledFun : calledFuns) {
+                                LIGHT_PRINT("Handling " << calledFun->getName() << "\n");
                                 //Don't recurse on this function call
                                 if (noRecurseSet.count(CallSite(currb)) != 0) {
                                     // DEBUG_PRINT("DFS path ended in BasicBlock: " << curr->getName() << " due to already processed recursive call\n");
@@ -971,10 +971,10 @@ namespace {
                     } else {
                         VERBOSE_PRINT("Context end, " << synchPoint->followingInsts[followingPoint].size() << " instructions\n");
                     }
-                    for (auto it=synchPoint->followingInsts[followingPoint].begin(),
-                             et=synchPoint->followingInsts[followingPoint].end();
-                         it != et; ++it)
-                        DEBUG_PRINT(**it << "\n");
+                    // for (auto it=synchPoint->followingInsts[followingPoint].begin(),
+                    //          et=synchPoint->followingInsts[followingPoint].end();
+                    //      it != et; ++it)
+                        //DEBUG_PRINT(**it << "\n");
                 }
             }
             VERBOSE_PRINT("Printing synchronization variable info...\n");
@@ -1040,11 +1040,11 @@ namespace {
         //Obtains the set of functions that can be immediately called when
         //executing inst
         SmallPtrSet<Function*,1> getCalledFuns(Instruction *inst) {
-            //LIGHT_PRINT("Finding functions that can be called by " << *inst << "\n");
+            LIGHT_PRINT("Finding functions that can be called by " << *inst << "\n");
             SmallPtrSet<Function*,1> toReturn;
             SmallPtrSet<Value*,8> alreadyVisited;
             if (isCallSite(inst)) {
-                //DEBUG_PRINT("which is a callsite\n");
+                DEBUG_PRINT("which is a callsite\n");
                 CallSite call = CallSite(inst);
                 Value *calledValue = call.getCalledValue();
                 //Rather than doing this: would it be possible with a decent AA to just
@@ -1060,7 +1060,7 @@ namespace {
                     alreadyVisited.insert(nextValue);
                     //Try to resolve the value into a function
                     if (auto fun = dyn_cast<Function>(nextValue)) {
-                        //LIGHT_PRINT(fun->getName() << " could be called\n");
+                        LIGHT_PRINT(fun->getName() << " could be called\n");
                         toReturn.insert(fun);
                     }
                     //Since we are dealing with functions, only a few
@@ -1103,7 +1103,6 @@ namespace {
                         calledValues.push_back(load->getPointerOperand());
                     }
                     else if (auto arg = dyn_cast<Argument>(nextValue)) {
-                        //LIGHT_PRINT(*inst << " calls a function passed as argument, finding functions that have their address taken. Argument is: " << *arg << "\n");
                         //Track values from the callsites
                         for (auto use = arg->getParent()->users().begin();
                              use != arg->getParent()->users().end();
@@ -1573,38 +1572,43 @@ namespace {
                 //If we have previously handled this value, skip it
                 if (!(visitedValues.insert(nextVal).second))
                     continue;
-                LIGHT_PRINT("Handling the value: " << *nextVal << "\n");
+                LIGHT_PRINT("Handling the value: " << nextVal->getName() << "\n");
                 //Otherwise, if this value is an instruction, add the function it is
                 //in to the synchronized functions. And add the users of that function
                 //to the queue. If the function is previously handled then skip
                 //adding the users of that function
                 if (Instruction *user = dyn_cast<Instruction>(nextVal)) {
-                //     LIGHT_PRINT("Was an instruction, adding parent: " << user->getParent()->getParent()->getName() << " as synchronized and adding the users of that function to the queue if it is not already handled\n");
+                LIGHT_PRINT("Was an instruction, adding parent: " << user->getParent()->getParent()->getName() << " as synchronized and adding the users of that function to the queue if it is not already handled\n");
                     
                     //If the instruction is a call, additionally track the called function
                     SmallPtrSet<Function*,1> calledFuns = getCalledFuns(user);
                     for (Function *cFun : calledFuns) {
-                        //LIGHT_PRINT(cFun->getName() << " is gonna be tracked probs\n");
-                        CallSite call(user);
-                        for (int i = 0; i < call.getNumArgOperands(); ++i) {
-                            if (visitedValues.count(call.getArgOperand(i)) != 0) {
-                                for (Argument &arg : cFun->getArgumentList()) {
-                                    if (arg.getArgNo() == i)
-                                        pthUsersQueue.push_back(&arg);
-                                }
-                            }
-                        }
+                        LIGHT_PRINT(cFun->getName() << " is gonna be tracked probs\n");
+                        pthUsersQueue.push_back(cFun);
+                        // CallSite call(user);
+                        // for (int i = 0; i < call.getNumArgOperands(); ++i) {
+                        //     if (visitedValues.count(call.getArgOperand(i)) != 0) {
+                        //         for (Argument &arg : cFun->getArgumentList()) {
+                        //             if (arg.getArgNo() == i)
+                        //                 pthUsersQueue.push_back(&arg);
+                        //         }
+                        //     }
+                        // }
                     }
                     
                     Function *inFunction=user->getParent()->getParent();
                     if (!(synchronizedFunctions.insert(inFunction).second))
                         continue;
                     for (auto uI = inFunction->users().begin(); uI != inFunction->users().end(); ++uI) {
+                        LIGHT_PRINT("Added " << uI->getName() << " as synchronized\n");
                         pthUsersQueue.push_back(*uI);
-                    }
-                    
+                    }                    
                 } 
                 //If the value is not an instruction, add the users of it to the queue
+                else if (Function *fun = dyn_cast<Function>(nextVal)) {
+                    LIGHT_PRINT("Was a function, adding it to synchronized functions\n");
+                    synchronizedFunctions.insert(fun);
+                } 
                 else {
                     LIGHT_PRINT("Was not an instruction, adding users to queue\n");
                     for (auto uI = nextVal->users().begin(); uI != nextVal->users().end(); ++uI) {
