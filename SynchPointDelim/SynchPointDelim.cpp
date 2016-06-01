@@ -97,9 +97,9 @@ static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for sy
 namespace {
 
     //These are the functions that start critical regions:
-    set<StringRef> critBeginFunctions = {"pthread_mutex_lock","sem_post","sem_wait","pthread_join"};
+    set<StringRef> critBeginFunctions = {"pthread_mutex_lock","sem_post","sem_wait","pthread_join","pthread_create"};
     //These are the functions that end critical regions:
-    set<StringRef> critEndFunctions = {"pthread_mutex_unlock","sem_post","sem_wait","pthread_join"};
+    set<StringRef> critEndFunctions = {"pthread_mutex_unlock","sem_post","sem_wait","pthread_join","pthread_create"};
     //These are the functions that are 'from' in a one-way synchronization:
     set<StringRef> onewayFromFunctions = {"pthread_cond_signal",
                                           "pthread_cond_broadcast",
