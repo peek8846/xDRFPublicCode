@@ -123,16 +123,23 @@ namespace {
             RMSIBar = M.getFunction("RMS_Initial_Barrier"); //will be analyzed
             RMSFBar = M.getFunction("RMS_Final_Barrier"); //will be analyzed
 
-            assert(bNDRF && eNDRF && bXDRF && eXDRF &&
-                   RMSIAcq && RMSIRel && RMSIBar && RMSFBar &&
-                   "Module does not contain all necessary annotation and RMS calls");
+            // assert(bNDRF && eNDRF && bXDRF && eXDRF &&
+            //        RMSIAcq && RMSIRel && RMSIBar && RMSFBar &&
+            //        "Module does not contain all necessary annotation and RMS calls");
 
+            assert(bNDRF && eNDRF && bXDRF && eXDRF &&
+                   "Module does not have compiler markings");
+            
             analyzeBeginNDRF();
             analyzeEndNDRF();
-            analyzeRMSInitialAcq();
-            analyzeRMSInitialRel();
-            analyzeRMSInitialBarrier();
-            analyzeRMSFinalBarrier();
+            if (RMSIAcq) {
+                analyzeRMSInitialAcq();
+                analyzeRMSInitialRel();
+            }
+            if (RMSIBar) {
+                analyzeRMSInitialBarrier();
+                analyzeRMSFinalBarrier();
+            }
             // analyzeRMSInitialSemSignal();
             // analyzeRMSInitialSemWait();
 
