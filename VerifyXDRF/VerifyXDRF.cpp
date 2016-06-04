@@ -315,10 +315,11 @@ namespace {
                         moveIteratorUp(prevInst);
                         if (isa<CallInst>(prevInst) &&
                             (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == eXDRF) {
-                            moveIteratorUp(prevInst);
+                            //moveIteratorUp(prevInst);
                             xDRF = false;
+                        } else {
+                            moveIteratorDown(prevInst);
                         }
-                        moveIteratorDown(prevInst);
                     } catch(runtime_error e) {
                         //This should not happen if delimitation is correct:
                         //Increase unaligned pred count
