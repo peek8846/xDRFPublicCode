@@ -12,5 +12,6 @@ set(CMAKE_BUILD_TYPE Debug)
 #add_subdirectory(SynchPointDelim)
 add_subdirectory(XDRFExtension)
 add_subdirectory(MarkXDRFRegions)
+add_subdirectory(MarkRMSRegions)
 add_subdirectory(VerifyXDRF)
 
