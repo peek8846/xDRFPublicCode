@@ -47,8 +47,10 @@
 // #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/InlineAsm.h"
 // #include "llvm/IR/Attributes.h"
 // #include "llvm/IR/NoFolder.h"
+#include "llvm/IR/GlobalValue.h"
 
 //#include "../Utils/SkelUtils/CallingDAE.cpp"
 //#include "../Utils/SkelUtils/MetadataInfo.h"
@@ -86,6 +88,9 @@
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
+//Internal name used for function that specifies atomic inline assembly
+#define INTERNAL_ATOMIC_ASM "__XDRF__INTERNAL_ATOMIC_ASM__"
+
 using namespace llvm;
 using namespace std;
 
@@ -97,9 +102,9 @@ static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for sy
 namespace {
 
     //These are the functions that start critical regions:
-    set<StringRef> critBeginFunctions = {"pthread_mutex_lock","sem_post","sem_wait","pthread_join","pthread_create","_Z19parsec_barrier_waitP16parsec_barrier_t"};
+    set<StringRef> critBeginFunctions = {"pthread_mutex_lock","sem_post","sem_wait","pthread_join","pthread_create","_Z19parsec_barrier_waitP16parsec_barrier_t",INTERNAL_ATOMIC_ASM};
     //These are the functions that end critical regions:
-    set<StringRef> critEndFunctions = {"pthread_mutex_unlock","sem_post","sem_wait","pthread_join","pthread_create","_Z19parsec_barrier_waitP16parsec_barrier_t"};
+    set<StringRef> critEndFunctions = {"pthread_mutex_unlock","sem_post","sem_wait","pthread_join","pthread_create","_Z19parsec_barrier_waitP16parsec_barrier_t",INTERNAL_ATOMIC_ASM};
     //These are the functions that are 'from' in a one-way synchronization:
     set<StringRef> onewayFromFunctions = {"pthread_cond_signal",
                                           "pthread_cond_broadcast",
@@ -118,6 +123,7 @@ namespace {
     set<StringRef> synchFunctions = {};
 
     //Used to set up what arguments of synch calls should be considered
+    //TODO: not actually used
     map<StringRef,int> synchArgDummy =
         {{"pthread_mutex_lock",-1},
          {"pthread_mutex_unlock",-1},
@@ -128,6 +134,7 @@ namespace {
     //These are the function to treat as if they spawn new
     //threads
     set<StringRef> threadFunctions = {"pthread_create"};
+
     
     struct SynchPointDelim : public ModulePass {
         static char ID;
@@ -143,6 +150,7 @@ namespace {
                                   onewayToFunctions.end());
             synchFunctions.insert(startThreadContextFunctions.begin(),
                                   startThreadContextFunctions.end());
+            DummyATOMICASMFunc=Function::Create(FunctionType::get(Type::getVoidTy(getGlobalContext()),false),GlobalValue::CommonLinkage,INTERNAL_ATOMIC_ASM);
         }
         
         //Manually free the data structures left over to be used by other passes
@@ -153,6 +161,7 @@ namespace {
                 delete ptr;
             for (CriticalRegion* ptr : criticalRegions)
                 delete ptr;
+            delete DummyATOMICASMFunc;
         }
 
     public:
@@ -188,7 +197,7 @@ namespace {
             //Find the "main" function
             Function *main = M.getFunction("main");
             if (!main) {
-                PRINT << "No 'main' function detected, considering manually inputing the entry function\n";
+                PRINT << "No 'main' function detected, consider manually inputting the entry function\n";
                 PRINT << "Exiting\n";
                 assert(!"Did not detect main function");  
             }
@@ -281,6 +290,8 @@ namespace {
         }
 
         AliasCombiner *aacombined;
+
+        Function *DummyATOMICASMFunc;
         
         //The state tracks the DFS of the program flow
         //Contains the most recent synch point tracked on this path
@@ -432,7 +443,9 @@ namespace {
                     delimitFunctionDynamic[start].trailingStates.push_back(newState);
                 }
 
-                assert(!(delimitFunctionDynamic[start].trailingStates.size() == 0 && start != wM->getFunction("main")) && "Empty trailing states in function that has finished analysis that is not main.");
+                //TODO: This is a bit too general, the real assert should check that if there are no trailstates (function returns only by unreachable) then the function must be a function
+                //that is either main or a thread entry point
+                //assert(!(delimitFunctionDynamic[start].trailingStates.size() == 0 && start != wM->getFunction("main")) && "Empty trailing states in function that has finished analysis that is not main.");
             }
             DEBUG_PRINT("Done analyzing " << start->getName() << "\n");
         }
@@ -612,7 +625,7 @@ namespace {
                     if (isSynch(currb)) {
                         //Handle synchronization point
                         //See if we've already visited this point
-                        // DEBUG_PRINT("Visited instruction that is synch point: " << *currb << "\n");
+                        DEBUG_PRINT("Visited instruction that is synch point: " << *currb << "\n");
                         SynchronizationPoint *synchPoint = findSynchPoint(synchronizationPoints,currb);
                         bool visited = true;
                         if (!synchPoint) {
@@ -1086,7 +1099,17 @@ namespace {
                             }
                         }
                     }
-                    
+                    //Special case, if we "call" inline assembly we merely need to decide whether the
+                    //assembly synchronizes or not. if there is a "lock" in the aseembly then it synchronizes,
+                    //otherwise it does not
+                    else if (auto inlineasm = dyn_cast<InlineAsm>(nextValue)) {
+                        LIGHT_PRINT("Could call assembly\n");
+                        if (inlineasm->getAsmString().find("lock") != string::npos) {
+                            LIGHT_PRINT("Could call atomic assembly\n");
+                            toReturn.insert(DummyATOMICASMFunc);
+                            LIGHT_PRINT("Returned as " << DummyATOMICASMFunc->getName() << "\n");
+                        }
+                    }
                     //Here we pick apart data structures
                     else if (auto gep = dyn_cast<GetElementPtrInst>(nextValue)) {
                         //Any remaining gep must, by definition, have a dynamic index
@@ -1555,15 +1578,28 @@ namespace {
             deque<Value*> pthUsersQueue;
             SmallPtrSet<Value*,32> visitedValues;
 
-            //for (auto pI = pthFunctions.begin(); pI != pthFunctions.end(); ++pI) {
-            for (StringRef syncName : synchFunctions) {
-                Function* syncFun = wM->getFunction(syncName);
-                if (syncFun) {
-                    for (auto uI = syncFun->users().begin(); uI != syncFun->users().end(); ++uI) {
-                        pthUsersQueue.push_back(*uI);
-                    }
-                } else {
-                    VERBOSE_PRINT("Module does not contain the synchronization function: " << syncName << "\n");
+            //for (StringRef syncName : synchFunctions) {
+            //     Function* syncFun = wM->getFunction(syncName);
+            //     if (syncFun) {
+            //         for (auto uI = syncFun->users().begin(); uI != syncFun->users().end(); ++uI) {
+            //             pthUsersQueue.push_back(*uI);
+            //         }
+            //     } else {
+            //         if (syncName.compare(INTERNAL_ATOMIC_ASM) != 0)
+            //             VERBOSE_PRINT("Module does not contain the synchronization function: " << syncName << "\n");
+            //     }
+            // }
+
+            //This is the new, slower, way of doing this which correctly
+            //detects inline asm that synchronizes
+            for (auto fun = wM->begin();
+                 fun != wM->end();
+                 ++fun) {
+                for (auto inst = inst_begin(&*fun);
+                     inst  != inst_end(&*fun);
+                     ++inst) {
+                    if (isSynch(&*inst))
+                        pthUsersQueue.push_back(&*inst);
                 }
             }
             
