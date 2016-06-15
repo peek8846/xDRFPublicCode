@@ -91,20 +91,64 @@ namespace {
         }
       
         virtual bool runOnModule(Module &M) {
-	    Function *beginNDRF = createDummyFunction("begin_NDRF",M);
-	    Function *endNDRF = createDummyFunction("end_NDRF",M);
-	    Function *beginXDRF = createDummyFunction("begin_XDRF",M);
-	    Function *endXDRF = createDummyFunction("end_XDRF",M);
+	    beginNDRF = createDummyFunction("begin_NDRF",M);
+	    endNDRF = createDummyFunction("end_NDRF",M);
+	    beginXDRF = createDummyFunction("begin_XDRF",M);
+	    endXDRF = createDummyFunction("end_XDRF",M);
+            
+            markInitialAcq(M);
+            markInitialBarrier(M);
+            markInitialAtomicAcq(M);
+            markInitialAtomicRelease(M);
+            markInitialAtomicAcqRel(M);
+            markInitialSemWait(M);
+            markInitialSemSignal(M);
 
             return true;
         }
     private:
 
+        Function *beginNDRF;
+        Function *endNDRF;
+        Function *beginXDRF;
+        Function *endXDRF;
+
+        SmallPtrSet<BasicBlock*,1> visited_acqrelease;
+        void markNextFinalRelease(Module &M,Instruction *start,bool enclave) {
+            Function * RMS_Final_Release = M.getFunction("RMS_Final_Release");
+            assert(RMS_Final_Release && "Module contains RMS_Initial_Acq but not RMS_Final_Release");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_acqrelease.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>(&*inst)) {
+                    if (call->getCalledFunction() == RMS_Final_Release) {
+                        //Mark it and return
+                        if (!enclave)
+                            createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
+                    }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial acq not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_Acq not followed by RMS_Final_Release @" << parent->getName() << "\n");
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalRelease(M,&*(succ->begin()),enclave);
+        }
+
         void markInitialAcq(Module &M) {
             Function * RMS_Initial_Acq = M.getFunction("RMS_Initial_Acq");
-            Function * RMS_Final_Release = M.getFunction("RMS_Initial_Acq");
-            if (!RMS_Initial_Acq || !RMS_Final_Release) {
-                VERBOSE_PRINT("No regular locks to mark");
+            if (!RMS_Initial_Acq) {
+                VERBOSE_PRINT("No regular locks to mark\n");
+                return;
             }
                 
             for (auto potentialcall : RMS_Initial_Acq->users()) {
@@ -113,68 +157,323 @@ namespace {
                     //Find whether it is enclave
                     enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(1).get())->getZExtValue() == MONXDRF;
                     //Mark it
-                    
+                    if (!enclave)
+                        createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalRelease(M,call,enclave);
                 }
             }
         }
-        
-        //Utility: Checks wether a given callsite contains a call
-        bool isNotNull(CallSite call) {
-            return call.isCall() || call.isInvoke();
-        }
-        
-        //Utility: Checks whether an instruction could be a callsite
-        bool isCallSite(Instruction* inst) {
-            return isNotNull(CallSite(inst));
+
+        SmallPtrSet<BasicBlock*,1> visited_barrier;
+        void markNextFinalBarrier(Module &M,Instruction *start) {
+            Function * RMS_Final_Barrier = M.getFunction("RMS_Final_Barrier");
+            assert(RMS_Final_Barrier && "Module contains RMS_Initial_Barrier but not RMS_Final_Barrier");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_barrier.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>((&*inst))) {
+                    if (call->getCalledFunction() == RMS_Final_Barrier) {
+                        //Mark it and return
+                        createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
+                    }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial acq not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_Barrier not followed by RMS_Final_Barrier @" << parent->getName() << "\n");
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalBarrier(M,&*(succ->begin()));
         }
 
-        //Finds the functions that may be the entry points of threads
-        //INPUT: The module to analyze and the set into which to insert
-        //the results
-        void findEntryPoints(Module &M, SmallPtrSet<Function*,4> &targetFunctions) {
-            VERBOSE_PRINT("Determining entry points for threads...\n");
-            //For each function that can spawn new threads, find the calls to that function
-            for (StringRef funName : threadFunctions) {
-                VERBOSE_PRINT("Finding functions used by " << funName << "\n");
-                Function *fun = M.getFunction(funName);
-                if (!fun) {
-                    VERBOSE_PRINT("was not used by module\n");
-                } else {
-                    for (auto call = fun->users().begin(); call != fun->users().end(); ++call) {
-                        DEBUG_PRINT("Examining use: " << **call << "\n");
-                        if (dyn_cast<Instruction>(*call) && isCallSite(dyn_cast<Instruction>(*call))) {
-                            CallSite callsite(*call);
-                            for (int opnum = 0; opnum < callsite.getNumArgOperands(); ++opnum) {
-                                Value *funcOp = callsite.getArgOperand(opnum);
-                                DEBUG_PRINT("Examining argument: " << *funcOp << "\n");
-                                //Try to resolve the value into a proper function
-                                while (!isa<Function>(funcOp)) {
-                                    if (isa<ConstantExpr>(funcOp)) {
-                                        ConstantExpr *constOp = dyn_cast<ConstantExpr>(funcOp);
-                                        if (constOp->isCast()) {
-                                            funcOp = constOp->getAsInstruction();
-                                            CastInst *castOp = dyn_cast<CastInst>(funcOp);
-                                            Value* tempOp = funcOp;
-                                            funcOp = castOp->getOperand(0);
-                                            delete(tempOp);
-                                        }
-                                    } else if (isa<CastInst>(funcOp)) {
-                                        CastInst *castOp = dyn_cast<CastInst>(funcOp);
-                                        funcOp = castOp->getOperand(0);
-                                    }
-                                    else { //Unable To Resolve
-                                        DEBUG_PRINT("Failed to resolve argument " << *funcOp
-                                                    << " to a function, remaining type is:" << typeid(*funcOp).name() << "\n");
-                                        break;
-                                    }
-                                }
-                                if (auto spawnFunc = dyn_cast<Function>(funcOp)) {
-                                    VERBOSE_PRINT("Targeting function: " << spawnFunc->getName() << "\n");
-                                    targetFunctions.insert(spawnFunc);
-                                }
-                            }
-                        }
+        void markInitialBarrier(Module &M) {
+            Function * RMS_Initial_Barrier = M.getFunction("RMS_Initial_Barrier");
+            if (!RMS_Initial_Barrier) {
+                VERBOSE_PRINT("No barriers to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : RMS_Initial_Barrier->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Mark it
+                    createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalBarrier(M,call);
+                }
+            }
+        }
+
+        SmallPtrSet<BasicBlock*,1> visited_atomic_acq;
+        void markNextFinalAtomicAcq(Module &M,Instruction *start,bool enclave) {
+            Function * RMS_Final_Atomic_Acq = M.getFunction("RMS_Final_Atomic_Acq");
+            assert(RMS_Final_Atomic_Acq && "Module contains RMS_Initial_Atomic_Acq but not RMS_Final_Atomic_Acq");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_atomic_acq.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>((&*inst))) {
+                    if (call->getCalledFunction() == RMS_Final_Atomic_Acq) {
+                        //Mark it and return
+                        if (!enclave)
+                            createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
                     }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial acq not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_Atomic_Acq not followed by RMS_Final_Atomic_Acq @" << parent->getName() << "\n");
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalAtomicAcq(M,&*(succ->begin()),enclave);
+        }
+
+        void markInitialAtomicAcq(Module &M) {
+            Function * RMS_Initial_Atomic_Acq = M.getFunction("RMS_Initial_Atomic_Acq");
+            if (!RMS_Initial_Atomic_Acq) {
+                VERBOSE_PRINT("No atomic_acqs to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : RMS_Initial_Atomic_Acq->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Find whether it is enclave
+                    bool enclave;
+                    if (call->getNumArgOperands() > 2)
+                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MONXDRF;
+                    else
+                        enclave = false; 
+                    //Mark it
+                    if (!enclave)
+                        createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalAtomicAcq(M,call,enclave);
+                }
+            }
+        }
+
+        SmallPtrSet<BasicBlock*,1> visited_atomic_release;
+        void markNextFinalAtomicRelease(Module &M,Instruction *start,bool enclave) {
+            Function * RMS_Final_Atomic_Release = M.getFunction("RMS_Final_Atomic_Release");
+            assert(RMS_Final_Atomic_Release && "Module contains RMS_Initial_Atomic_Release but not RMS_Final_Atomic_Release");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_atomic_release.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>((&*inst))) {
+                    if (call->getCalledFunction() == RMS_Final_Atomic_Release) {
+                        //Mark it and return
+                        if (!enclave)
+                            createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
+                    }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial release not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_Atomic_Release not followed by RMS_Final_Atomic_Release @" << parent->getName() << "\n");
+
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalAtomicRelease(M,&*(succ->begin()),enclave);
+        }
+
+        void markInitialAtomicRelease(Module &M) {
+            Function * RMS_Initial_Atomic_Release = M.getFunction("RMS_Initial_Atomic_Release");
+            if (!RMS_Initial_Atomic_Release) {
+                VERBOSE_PRINT("No atomic_releases to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : RMS_Initial_Atomic_Release->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Find whether it is enclave
+                    bool enclave;
+                    if (call->getNumArgOperands() > 2)
+                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MONXDRF;
+                    else
+                        enclave = false; 
+                    //Mark it
+                    if (!enclave)
+                        createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalAtomicRelease(M,call,enclave);
+                }
+            }
+        }
+
+        SmallPtrSet<BasicBlock*,1> visited_atomic_acqrel;
+        void markNextFinalAtomicAcqRel(Module &M,Instruction *start,bool enclave) {
+            Function * RMS_Final_Atomic_AcqRel = M.getFunction("RMS_Final_Atomic_AcqRel");
+            assert(RMS_Final_Atomic_AcqRel && "Module contains RMS_Initial_Atomic_AcqRel but not RMS_Final_Atomic_AcqRel");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_atomic_release.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>((&*inst))) {
+                    if (call->getCalledFunction() == RMS_Final_Atomic_AcqRel) {
+                        //Mark it and return
+                        if (!enclave)
+                            createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
+                    }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial release not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_Atomic_AcqRel not followed by RMS_Final_Atomic_AcqRel @" << parent->getName() << "\n");
+
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalAtomicAcqRel(M,&*(succ->begin()),enclave);
+        }
+
+        void markInitialAtomicAcqRel(Module &M) {
+            Function * RMS_Initial_Atomic_AcqRel = M.getFunction("RMS_Initial_Atomic_AcqRel");
+            if (!RMS_Initial_Atomic_AcqRel) {
+                VERBOSE_PRINT("No atomic_acqrel to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : RMS_Initial_Atomic_AcqRel->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Find whether it is enclave
+                    bool enclave;
+                    if (call->getNumArgOperands() > 2)
+                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MONXDRF;
+                    else
+                        enclave = false; 
+                    //Mark it
+                    if (!enclave)
+                        createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalAtomicAcqRel(M,call,enclave);
+                    return;
+                }
+            }
+        }
+
+        SmallPtrSet<BasicBlock*,1> visited_semwait;
+        void markNextFinalSemWait(Module &M,Instruction *start) {
+            Function * RMS_Final_SemWait = M.getFunction("RMS_Final_SemWait");
+            assert(RMS_Final_SemWait && "Module contains RMS_Initial_SemWait but not RMS_Final_SemWait");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_atomic_release.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>((&*inst))) {
+                    if (call->getCalledFunction() == RMS_Final_SemWait) {
+                        //Mark it and return
+                        createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
+                    }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial release not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_SemWait not followed by RMS_Final_SemWait @" << parent->getName() << "\n");
+
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalSemWait(M,&*(succ->begin()));
+        }
+
+        void markInitialSemWait(Module &M) {
+            Function * RMS_Initial_SemWait = M.getFunction("RMS_Initial_SemWait");
+            if (!RMS_Initial_SemWait) {
+                VERBOSE_PRINT("No semwaits to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : RMS_Initial_SemWait->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Mark it
+                    createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalSemWait(M,call);
+                    return;
+                }
+            }
+        }
+
+        SmallPtrSet<BasicBlock*,1> visited_semsignal;
+        void markNextFinalSemSignal(Module &M,Instruction *start) {
+            Function * RMS_Final_SemSignal = M.getFunction("RMS_Final_SemSignal");
+            assert(RMS_Final_SemSignal && "Module contains RMS_Initial_SemSignal but not RMS_Final_SemSignal");
+            BasicBlock *parent = start->getParent();
+            //If someone previously handled this basicblock, return
+            if (!(visited_atomic_release.insert(parent).second))
+                return;
+            BasicBlock::iterator inst = BasicBlock::iterator(start);
+            while (inst != parent->end()) {
+                if (auto call = dyn_cast<CallInst>((&*inst))) {
+                    if (call->getCalledFunction() == RMS_Final_SemSignal) {
+                        //Mark it and return
+                        createDummyCall(beginXDRF,call,false,0);
+                        createDummyCall(endNDRF,call,false,0);
+                        return;
+                    }
+                }
+                inst++;
+            }
+            //If we finish a basicblock, it MUST have atleast 1 successor. Otherwise the RMS calls are incorrectly used
+            //assert(succ_begin(parent) != succ_end(parent) && "RMS initial release not followed by RMS final release");
+            if (succ_begin(parent) == succ_end(parent))
+                VERBOSE_PRINT("Warning: RMS_Initial_SemSignal not followed by RMS_Final_SemSignal @" << parent->getName() << "\n");
+
+            for (auto succ = succ_begin(parent);
+                 succ != succ_end(parent);
+                 ++succ)
+                markNextFinalSemSignal(M,&*(succ->begin()));
+        }
+
+        void markInitialSemSignal(Module &M) {
+            Function * RMS_Initial_SemSignal = M.getFunction("RMS_Initial_SemSignal");
+            if (!RMS_Initial_SemSignal) {
+                VERBOSE_PRINT("No semsignals to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : RMS_Initial_SemSignal->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Mark it
+                    createDummyCall(endXDRF,call,0);
+                    createDummyCall(beginNDRF,call,0);
+                    markNextFinalSemSignal(M,call);
+                    return;
                 }
             }
         }
@@ -222,7 +521,7 @@ namespace {
 }
 
 char MarkRMSRegions::ID = 0;
-static RegisterPass<MarkRMSRegions> Z("MarkRMS",
+static RegisterPass<MarkRMSRegions> Z("mark-rms",
 				       "Marks nDRF and XDRF regions on RMS calls",
 				       true,
 				       true);
