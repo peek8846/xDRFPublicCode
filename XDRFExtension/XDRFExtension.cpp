@@ -215,6 +215,7 @@ namespace {
                 if (region->startHere) {
                     VERBOSE_PRINT("Starting from region: " << region->ID << "\n");
                     xDRFRegion * startRegion = new xDRFRegion;
+                    xDRFRegions.insert(startRegion);
                     consolidateXDRFRegions(region,startRegion);
                 }
             printInfo();
@@ -367,15 +368,8 @@ namespace {
 
             VERBOSE_PRINT("Handling region " << regionToExtend->ID << "\n");
 
-            //Handle special cases, signals and waits are never xDRF
-            if (regionToExtend->receivesSignal || regionToExtend->sendsSignal) {
-                regionToExtend->enclave=false;
-                return make_pair(toCompareAgainst,followingRegions);
-            }
-
             //Handles recursive cases
             extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);
-
 
             //Obtain the instructions to compare from regions that follow us
             for (nDRFRegion * region : regionToExtend->followingRegions) {
@@ -399,6 +393,12 @@ namespace {
                                         recursiveCompareAgainst.second.end());
             }
 
+            //Handle special cases, signals and waits are never xDRF
+            if (regionToExtend->receivesSignal || regionToExtend->sendsSignal) {
+                regionToExtend->enclave=false;
+                return extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);
+            }
+            
             VERBOSE_PRINT("Handling " << regionToExtend->ID << ":\n");
             VERBOSE_PRINT("  Has " << regionToExtend->getPrecedingInsts().size() << " preceding instructions\n"); 
             VERBOSE_PRINT("  Contains " << regionToExtend->containedInstructions.size() << " instructions\n");
@@ -410,7 +410,9 @@ namespace {
                 for (Instruction * instAfter : toCompareAgainst) {
                     //Comparing instructions to themselves, in case of loops, is perfectly fine
                     if (MAYCONFLICT(instPre,instAfter)) {
-                        regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
+                        if (!skipConflictStore)
+                            regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
+                        DEBUG_PRINT("Found conflict between preceding and following DRF regions\n");
                         conflict=true;
                     }
                 }
@@ -421,6 +423,7 @@ namespace {
                             if (MAYCONFLICT(instPre,instIn)) {
                                 if (!skipConflictStore)
                                     region->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
+                                DEBUG_PRINT("Found conflict between preceding DRF and following nDRF regions\n");
                                 conflict=true;
                             }
                         }
@@ -433,6 +436,7 @@ namespace {
                     if (MAYCONFLICT(instPre,instIn)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(regionToExtend,instIn)));
+                        DEBUG_PRINT("Found conflict between nDRF region and preceding DRF regions\n");
                         conflict=true;
                     }
                 }
@@ -440,6 +444,7 @@ namespace {
                     if (MAYCONFLICT(instAfter,instIn)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsTowardsDRF.insert(make_pair(instAfter,make_pair(regionToExtend,instIn)));
+                        DEBUG_PRINT("Found conflict between nDRF region and following DRF regions\n");
                         conflict=true;
                     }
                 }
@@ -501,6 +506,11 @@ namespace {
                 for (pair<Instruction*,Instruction*> conflict : region->conflictsBetweenDRF) {
                     VERBOSE_PRINT("    " << *(conflict.first) << " conflicts with " << *(conflict.second) << "\n");
                 }
+                VERBOSE_PRINT("  Conflicts towards DRF regions:\n");
+                for (pair<Instruction*, pair<nDRFRegion*,Instruction*> > conflict : region->conflictsTowardsDRF) {
+                    VERBOSE_PRINT("    DRF instruction" << *(conflict.first) << " conflicts with instruction" << *(conflict.second.second) << " in region with ID " << (conflict.second.first)->ID << "\n");
+                }
+
             }
             VERBOSE_PRINT("Printing xDRF region info...\n");
             for (xDRFRegion * region : xDRFRegions) {
@@ -529,37 +539,46 @@ namespace {
             SmallPtrSet<Instruction*,128> predinsts = startHere->getPrecedingInsts();
             inRegion->containedInstructions.insert(predinsts.begin(),
                                                    predinsts.end());
-            for (auto xDRFRegion : xDRFRegions) {
-                if (xDRFRegion->followingNDRFs.count(startHere) != 0 || xDRFRegion->enclaveNDRFs.count(startHere) != 0) {
+            for (auto region : xDRFRegions) {
+                DEBUG_PRINT("Region contains:\n");
+                DEBUG_PRINT("Following:");
+                for (auto reg : region->followingNDRFs)
+                    DEBUG_PRINT(reg->ID << "\n");
+                DEBUG_PRINT("Enclave:");
+                for (auto reg : region->enclaveNDRFs)
+                    DEBUG_PRINT(reg->ID << "\n");
+                if (region->followingNDRFs.count(startHere) != 0 || region->enclaveNDRFs.count(startHere) != 0) {
                     //Already handled case
-                    if (xDRFRegion == inRegion)
+                    if (region == inRegion)
                         return;
                     //Tomerge case
-                    VERBOSE_PRINT("Merged xDRF " << inRegion->ID << " into xDRF " << xDRFRegion->ID << "\n");
-                    xDRFRegion->followingNDRFs.insert(inRegion->followingNDRFs.begin(),
+                    VERBOSE_PRINT("Merged xDRF " << inRegion->ID << " into xDRF " << region->ID << "\n");
+                    region->followingNDRFs.insert(inRegion->followingNDRFs.begin(),
                                                     inRegion->followingNDRFs.end());
-                    xDRFRegion->precedingNDRFs.insert(inRegion->precedingNDRFs.begin(),
+                    region->precedingNDRFs.insert(inRegion->precedingNDRFs.begin(),
                                                     inRegion->precedingNDRFs.end());
-                    xDRFRegion->enclaveNDRFs.insert(inRegion->enclaveNDRFs.begin(),
+                    region->enclaveNDRFs.insert(inRegion->enclaveNDRFs.begin(),
                                                   inRegion->enclaveNDRFs.end());
-                    xDRFRegion->conflictsTowardsXDRF.insert(inRegion->conflictsTowardsXDRF.begin(),
+                    region->conflictsTowardsXDRF.insert(inRegion->conflictsTowardsXDRF.begin(),
                                                           inRegion->conflictsTowardsXDRF.end());       
-                    xDRFRegion->conflictsTowardsNDRF.insert(inRegion->conflictsTowardsNDRF.begin(),
+                    region->conflictsTowardsNDRF.insert(inRegion->conflictsTowardsNDRF.begin(),
                                                           inRegion->conflictsTowardsNDRF.end());
                     delete(inRegion);
-                    translation[inRegion]=xDRFRegion;
+                    translation[inRegion]=region;
                     xDRFRegions.erase(inRegion);
-                    inRegion=xDRFRegion;
+                    inRegion=region;
                     return;
                 }
             }
 
 
             if (startHere->enclave) {
+                VERBOSE_PRINT("Was enclave, added to enclave regions\n");
                 inRegion->enclaveNDRFs.insert(startHere);
             } else {
                 //Create a new xDRF region, and consolidate the areas following the following nDRFs
                 //Also set up the preceding/following dynamics
+                VERBOSE_PRINT("Was non-enclave, new xDRF region started\n");
                 xDRFRegion * newXDRF = new xDRFRegion;
                 xDRFRegions.insert(newXDRF);
                 inRegion->followingNDRFs.insert(startHere);
@@ -574,6 +593,7 @@ namespace {
                 }
                 inRegion=newXDRF;
             }
+
             for (nDRFRegion * followRegion : startHere->followingRegions) {
                 while (translation.count(inRegion) != 0) {
                     assert(translation[inRegion] != inRegion && "Region merged into itself");
