@@ -10,7 +10,7 @@
 #include <string>
 
 // #include <stack>
-// #include <set>
+#include <set>
 #include <vector>
 #include <deque>
 // #include <list>
@@ -41,10 +41,11 @@
 // #include "llvm/IR/CFG.h"
 // #include "llvm/IR/DerivedTypes.h"
 // #include "llvm/IR/Dominators.h"
-// #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Constants.h"
 // #include "llvm/IR/Attributes.h"
 #include "llvm/IR/NoFolder.h"
+#include "llvm/IR/CallSite.h"
 
 // #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/CFG.h"
@@ -79,8 +80,12 @@ using namespace std;
 #define MONXDRF 0
 #define MOXDRF 1
 
+#define TRACE_NUMBER 0
+
 namespace {
 
+    set<StringRef> threadFunctions = {"pthread_create"};
+    
     struct MarkRMSRegions : public ModulePass {
         static char ID;
         MarkRMSRegions() : ModulePass(ID) {
@@ -91,6 +96,22 @@ namespace {
         }
       
         virtual bool runOnModule(Module &M) {
+
+            SmallPtrSet<Function*,4> entrypoints;
+
+            //Find the "main" function
+            Function *main = M.getFunction("main");
+            if (!main) {
+                PRINT << "No 'main' function detected, considering manually inputing the entry function\n";
+                PRINT << "Exiting\n";
+                assert(!"Did not detect main function");  
+            }
+            entrypoints.insert(main);
+
+            //Find other functions to analyze
+            findEntryPoints(M,entrypoints);
+
+            
 	    beginNDRF = createDummyFunction("begin_NDRF",M);
 	    endNDRF = createDummyFunction("end_NDRF",M);
 	    beginXDRF = createDummyFunction("begin_XDRF",M);
@@ -103,7 +124,19 @@ namespace {
             markInitialAtomicAcqRel(M);
             markInitialSemWait(M);
             markInitialSemSignal(M);
-
+            markParsecBarrier(M);
+            
+            for (Function * fun : entrypoints) {
+                VERBOSE_PRINT("Marking entry/exit xDRF regions in " << fun->getName() << "\n");
+                createDummyCall(beginXDRF,&*inst_begin(fun),true,TRACE_NUMBER);
+                for (auto bit = inst_begin(fun),
+                         bet = inst_end(fun);
+                     bit != bet; ++bit) {
+                    if (isa<ReturnInst>(&*bit))
+                        createDummyCall(endXDRF,&*bit,TRACE_NUMBER);
+                }
+            }
+            
             return true;
         }
     private:
@@ -158,8 +191,8 @@ namespace {
                     enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(1).get())->getZExtValue() == MONXDRF;
                     //Mark it
                     if (!enclave)
-                        createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                        createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalRelease(M,call,enclave);
                 }
             }
@@ -178,8 +211,8 @@ namespace {
                 if (auto call = dyn_cast<CallInst>((&*inst))) {
                     if (call->getCalledFunction() == RMS_Final_Barrier) {
                         //Mark it and return
-                        createDummyCall(beginXDRF,call,false,0);
-                        createDummyCall(endNDRF,call,false,0);
+                        createDummyCall(beginXDRF,call,false,TRACE_NUMBER);
+                        createDummyCall(endNDRF,call,false,TRACE_NUMBER);
                         return;
                     }
                 }
@@ -205,8 +238,8 @@ namespace {
             for (auto potentialcall : RMS_Initial_Barrier->users()) {
                 if (auto call = dyn_cast<CallInst>(potentialcall)) {
                     //Mark it
-                    createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                    createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalBarrier(M,call);
                 }
             }
@@ -226,8 +259,8 @@ namespace {
                     if (call->getCalledFunction() == RMS_Final_Atomic_Acq) {
                         //Mark it and return
                         if (!enclave)
-                            createDummyCall(beginXDRF,call,false,0);
-                        createDummyCall(endNDRF,call,false,0);
+                            createDummyCall(beginXDRF,call,false,TRACE_NUMBER);
+                        createDummyCall(endNDRF,call,false,TRACE_NUMBER);
                         return;
                     }
                 }
@@ -260,8 +293,8 @@ namespace {
                         enclave = false; 
                     //Mark it
                     if (!enclave)
-                        createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                        createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalAtomicAcq(M,call,enclave);
                 }
             }
@@ -281,8 +314,8 @@ namespace {
                     if (call->getCalledFunction() == RMS_Final_Atomic_Release) {
                         //Mark it and return
                         if (!enclave)
-                            createDummyCall(beginXDRF,call,false,0);
-                        createDummyCall(endNDRF,call,false,0);
+                            createDummyCall(beginXDRF,call,false,TRACE_NUMBER);
+                        createDummyCall(endNDRF,call,false,TRACE_NUMBER);
                         return;
                     }
                 }
@@ -316,8 +349,8 @@ namespace {
                         enclave = false; 
                     //Mark it
                     if (!enclave)
-                        createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                        createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalAtomicRelease(M,call,enclave);
                 }
             }
@@ -337,8 +370,8 @@ namespace {
                     if (call->getCalledFunction() == RMS_Final_Atomic_AcqRel) {
                         //Mark it and return
                         if (!enclave)
-                            createDummyCall(beginXDRF,call,false,0);
-                        createDummyCall(endNDRF,call,false,0);
+                            createDummyCall(beginXDRF,call,false,TRACE_NUMBER);
+                        createDummyCall(endNDRF,call,false,TRACE_NUMBER);
                         return;
                     }
                 }
@@ -372,10 +405,9 @@ namespace {
                         enclave = false; 
                     //Mark it
                     if (!enclave)
-                        createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                        createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalAtomicAcqRel(M,call,enclave);
-                    return;
                 }
             }
         }
@@ -393,8 +425,8 @@ namespace {
                 if (auto call = dyn_cast<CallInst>((&*inst))) {
                     if (call->getCalledFunction() == RMS_Final_SemWait) {
                         //Mark it and return
-                        createDummyCall(beginXDRF,call,false,0);
-                        createDummyCall(endNDRF,call,false,0);
+                        createDummyCall(beginXDRF,call,false,TRACE_NUMBER);
+                        createDummyCall(endNDRF,call,false,TRACE_NUMBER);
                         return;
                     }
                 }
@@ -421,10 +453,9 @@ namespace {
             for (auto potentialcall : RMS_Initial_SemWait->users()) {
                 if (auto call = dyn_cast<CallInst>(potentialcall)) {
                     //Mark it
-                    createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                    createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalSemWait(M,call);
-                    return;
                 }
             }
         }
@@ -442,8 +473,8 @@ namespace {
                 if (auto call = dyn_cast<CallInst>((&*inst))) {
                     if (call->getCalledFunction() == RMS_Final_SemSignal) {
                         //Mark it and return
-                        createDummyCall(beginXDRF,call,false,0);
-                        createDummyCall(endNDRF,call,false,0);
+                        createDummyCall(beginXDRF,call,false,TRACE_NUMBER);
+                        createDummyCall(endNDRF,call,false,TRACE_NUMBER);
                         return;
                     }
                 }
@@ -470,14 +501,92 @@ namespace {
             for (auto potentialcall : RMS_Initial_SemSignal->users()) {
                 if (auto call = dyn_cast<CallInst>(potentialcall)) {
                     //Mark it
-                    createDummyCall(endXDRF,call,0);
-                    createDummyCall(beginNDRF,call,0);
+                    createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
                     markNextFinalSemSignal(M,call);
-                    return;
                 }
             }
         }
 
+        void markParsecBarrier(Module &M) {
+            Function * parsecBarrier = M.getFunction("_Z19parsec_barrier_waitP16parsec_barrier_t");
+            if (!parsecBarrier) {
+                VERBOSE_PRINT("No parsec_barrier to mark\n");
+                return;
+            }
+                
+            for (auto potentialcall : parsecBarrier->users()) {
+                if (auto call = dyn_cast<CallInst>(potentialcall)) {
+                    //Mark it
+                    createDummyCall(endXDRF,call,true,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,true,TRACE_NUMBER);
+                    createDummyCall(endXDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
+                }
+            }
+        }
+
+        
+        //Utility: Checks wether a given callsite contains a call
+        bool isNotNull(CallSite call) {
+            return call.isCall() || call.isInvoke();
+        }
+        
+        //Utility: Checks whether an instruction could be a callsite
+        bool isCallSite(Instruction* inst) {
+            return isNotNull(CallSite(inst));
+        }
+
+        //Finds the functions that may be the entry points of threads
+        //INPUT: The module to analyze and the set into which to insert
+        //the results
+        void findEntryPoints(Module &M, SmallPtrSet<Function*,4> &targetFunctions) {
+            VERBOSE_PRINT("Determining entry points for threads...\n");
+            //For each function that can spawn new threads, find the calls to that function
+            for (StringRef funName : threadFunctions) {
+                VERBOSE_PRINT("Finding functions used by " << funName << "\n");
+                Function *fun = M.getFunction(funName);
+                if (!fun) {
+                    VERBOSE_PRINT("was not used by module\n");
+                } else {
+                    for (auto call = fun->users().begin(); call != fun->users().end(); ++call) {
+                        DEBUG_PRINT("Examining use: " << **call << "\n");
+                        if (dyn_cast<Instruction>(*call) && isCallSite(dyn_cast<Instruction>(*call))) {
+                            CallSite callsite(*call);
+                            for (int opnum = 0; opnum < callsite.getNumArgOperands(); ++opnum) {
+                                Value *funcOp = callsite.getArgOperand(opnum);
+                                DEBUG_PRINT("Examining argument: " << *funcOp << "\n");
+                                //Try to resolve the value into a proper function
+                                while (!isa<Function>(funcOp)) {
+                                    if (isa<ConstantExpr>(funcOp)) {
+                                        ConstantExpr *constOp = dyn_cast<ConstantExpr>(funcOp);
+                                        if (constOp->isCast()) {
+                                            funcOp = constOp->getAsInstruction();
+                                            CastInst *castOp = dyn_cast<CastInst>(funcOp);
+                                            Value* tempOp = funcOp;
+                                            funcOp = castOp->getOperand(0);
+                                            delete(tempOp);
+                                        }
+                                    } else if (isa<CastInst>(funcOp)) {
+                                        CastInst *castOp = dyn_cast<CastInst>(funcOp);
+                                        funcOp = castOp->getOperand(0);
+                                    }
+                                    else { //Unable To Resolve
+                                        DEBUG_PRINT("Failed to resolve argument " << *funcOp
+                                                    << " to a function, remaining type is:" << typeid(*funcOp).name() << "\n");
+                                        break;
+                                    }
+                                }
+                                if (auto spawnFunc = dyn_cast<Function>(funcOp)) {
+                                    VERBOSE_PRINT("Targeting function: " << spawnFunc->getName() << "\n");
+                                    targetFunctions.insert(spawnFunc);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         //Sets dummy to point to a function with name and a dummy implementation
       
