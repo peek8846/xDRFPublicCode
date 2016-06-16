@@ -75,6 +75,8 @@
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
+#define TRACE_NUMBER 1
+
 using namespace llvm;
 using namespace std;
 
@@ -120,24 +122,24 @@ namespace {
 	    for (nDRFRegion * region : xdrfextended.nDRFRegions) {
                 for (Instruction * inst : region->beginsAt) {
                     if (!(region->enclave))
-                        createDummyCall(endXDRF,inst,0);
-                    createDummyCall(beginNDRF,inst,0);
+                        createDummyCall(endXDRF,inst,TRACE_NUMBER);
+                    createDummyCall(beginNDRF,inst,TRACE_NUMBER);
                 }
                 for (Instruction * inst : region->endsAt) {
                     if (!(region->enclave))
-                        createDummyCall(beginXDRF,inst,false,0);
-                    createDummyCall(endNDRF,inst,false,0);
+                        createDummyCall(beginXDRF,inst,false,TRACE_NUMBER);
+                    createDummyCall(endNDRF,inst,false,TRACE_NUMBER);
                 }
 	    }
 
             for (Function * fun : entrypoints) {
                 VERBOSE_PRINT("Marking entry/exit xDRF regions in " << fun->getName() << "\n");
-                createDummyCall(beginXDRF,&*inst_begin(fun),true,0);
+                createDummyCall(beginXDRF,&*inst_begin(fun),true,TRACE_NUMBER);
                 for (auto bit = inst_begin(fun),
                          bet = inst_end(fun);
                      bit != bet; ++bit) {
                     if (isa<ReturnInst>(&*bit))
-                        createDummyCall(endXDRF,&*bit,0);
+                        createDummyCall(endXDRF,&*bit,TRACE_NUMBER);
                 }
             }
 
