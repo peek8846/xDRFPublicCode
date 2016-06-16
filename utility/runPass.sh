@@ -6,6 +6,7 @@ XDRFExtensionSo=$XDRF_BUILD/XDRFExtension/libXDRFExtension.so
 MarkXDRFRegionsSo=$XDRF_BUILD/MarkXDRFRegions/libMarkXDRFRegions.so
 VerifyXDRFSo=$XDRF_BUILD/VerifyXDRF/libVerifyXDRF.so
 FlowSensitiveSo=$XDRF_BUILD/../xDRF-src/SVF-master/Release+Asserts/lib/libwpa.so
+MarkRMSRegionsSo=$XDRF_BUILD/MarkRMSRegions/libMarkRMSRegions.so
 # if [ ! -e $SynchPointDelimSo ] ; then
 #     echo "Could not find SynchPointDelim pass, make sure you have setup the env and compiled the passes"
 #     exit 1
@@ -34,4 +35,7 @@ shift
 opt -S \
     -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
     -internalize -internalize-public-api-list "main" -adce -globaldce $AAs -SPDelim -XDRFextend -MarkXDRF $@\
-    $targetFile $outputFile
+    $targetFile -o .internal_temp
+opt -S \
+    -load $MarkRMSRegionsSo -mark-rms .internal_temp $outputFile
+rm .internal_temp
