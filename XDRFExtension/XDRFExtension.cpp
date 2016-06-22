@@ -96,6 +96,10 @@ static cl::opt<string> graphOutput2("g2", cl::desc("Specify output dot file for 
 
 static cl::opt<bool> skipConflictStore("nostore",cl::desc("Do not store data access conflict info"));
 
+static cl::opt<AliasResult> ALIASLEVEL("aalevel",cl::desc("The required aliasing level to detect a conflict"),
+                                       cl::value_desc("AliasResult"),
+                                       cl::init(MustAlias));
+
 struct nDRFRegion {
     nDRFRegion() {
         static int rID = 0;
@@ -202,7 +206,7 @@ namespace {
             setupNDRFRegions(syncdelimited);
             printnDRFRegionGraph(M);
             //Pass &aa = getAnalysis<AAResultsWrapperPass>();
-            aacombined = new AliasCombiner(&M,true,this,MustAlias);
+            aacombined = new AliasCombiner(&M,true,this,ALIASLEVEL);
             //aacombined->addAliasResult(&aa);
             VERBOSE_PRINT("Determining enclaveness of nDRF regions\n");
             for (nDRFRegion * region : nDRFRegions)
