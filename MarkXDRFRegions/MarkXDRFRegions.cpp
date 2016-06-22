@@ -75,7 +75,11 @@
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
-#define TRACE_NUMBER 1
+
+static cl::opt<int> TRACE_NUMBER ("trace", cl::desc("Specify the number that is used as argument to the xDRF and nDRF markings"),
+                                  cl::value_desc("trace number"),
+                                  cl::init(1));
+//#define TRACE_NUMBER 1
 
 using namespace llvm;
 using namespace std;
