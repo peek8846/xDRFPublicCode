@@ -188,7 +188,7 @@ namespace {
                 bool enclave;
                 if (auto call = dyn_cast<CallInst>(potentialcall)) {
                     //Find whether it is enclave
-                    enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(1).get())->getZExtValue() == MONXDRF;
+                    enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(1).get())->getZExtValue() == MOXDRF;
                     //Mark it
                     if (!enclave)
                         createDummyCall(endXDRF,call,TRACE_NUMBER);
@@ -288,7 +288,7 @@ namespace {
                     //Find whether it is enclave
                     bool enclave;
                     if (call->getNumArgOperands() > 2)
-                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MONXDRF;
+                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MOXDRF;
                     else
                         enclave = false; 
                     //Mark it
@@ -344,7 +344,7 @@ namespace {
                     //Find whether it is enclave
                     bool enclave;
                     if (call->getNumArgOperands() > 2)
-                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MONXDRF;
+                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MOXDRF;
                     else
                         enclave = false; 
                     //Mark it
@@ -400,7 +400,7 @@ namespace {
                     //Find whether it is enclave
                     bool enclave;
                     if (call->getNumArgOperands() > 2)
-                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MONXDRF;
+                        enclave = dyn_cast<ConstantInt>(call->getArgOperandUse(2).get())->getZExtValue() == MOXDRF;
                     else
                         enclave = false; 
                     //Mark it
