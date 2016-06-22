@@ -97,8 +97,12 @@ static cl::opt<string> graphOutput2("g2", cl::desc("Specify output dot file for 
 static cl::opt<bool> skipConflictStore("nostore",cl::desc("Do not store data access conflict info"));
 
 static cl::opt<AliasResult> ALIASLEVEL("aalevel",cl::desc("The required aliasing level to detect a conflict"),
-                                       cl::value_desc("AliasResult"),
-                                       cl::init(MustAlias));
+                                       cl::init(MustAlias),
+                                       cl::values(clEnumVal(NoAlias,"All loads and stores will conflict"),
+                                                  clEnumVal(MayAlias,"All loads and stores not proven to noconflict will conflict"),
+                                                  clEnumVal(PartialAlias,"Only loads and stores that might overlap will conflict"),
+                                                  clEnumVal(MustAlias,"Only loads and stores that are proven to point to the same location will conflict"),
+                                                  clEnumValEnd));
 
 struct nDRFRegion {
     nDRFRegion() {
