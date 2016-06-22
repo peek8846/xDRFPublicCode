@@ -216,7 +216,9 @@ namespace {
         //Sets dummy to point to a function with name and a dummy implementation
       
         Function *createDummyFunction(string name, Module &M) {
-            assert(!M.getFunction(name) && "Error creating dummy function, a function with that name already existed");
+            if (M.getFunction(name))
+                return M.getFunction(name);
+            // assert(!M.getFunction(name) && "Error creating dummy function, a function with that name already existed");
             Function *toReturn =
                 cast<Function>(M.getOrInsertFunction(name,
                                                      FunctionType::get(Type::getVoidTy(getGlobalContext()),
