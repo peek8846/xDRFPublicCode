@@ -131,6 +131,9 @@ namespace {
          {"pthread_cond_broadcast",-1},
          {"pthread_cond_wait",-1}};
 
+    //Functions that should never be considered for tracking
+    set<StringRef> noAnalyzeFunctions = {"begin_NDRF","end_NDRF","begin_XDRF","end_XDRF"};
+    
     //These are the function to treat as if they spawn new
     //threads
     set<StringRef> threadFunctions = {"pthread_create"};
@@ -1074,7 +1077,8 @@ namespace {
                     //Try to resolve the value into a function
                     if (auto fun = dyn_cast<Function>(nextValue)) {
                         LIGHT_PRINT(fun->getName() << " could be called\n");
-                        toReturn.insert(fun);
+                        if (noAnalyzeFunctions.count(fun->getName()) == 0)
+                            toReturn.insert(fun);
                     }
                     //Since we are dealing with functions, only a few
                     //instructions should be possible
@@ -1146,7 +1150,8 @@ namespace {
                                 //LIGHT_PRINT("It has its adress taken\n");
                                 if (fun.getFunctionType() == dyn_cast<FunctionType>(getTypeOfPointerType(glob->getType()))) {
                                     //LIGHT_PRINT("And the types match\n");
-                                    toReturn.insert(&fun);
+                                    if (noAnalyzeFunctions.count(fun.getName()) == 0)
+                                        toReturn.insert(&fun);
                                 }
                             }
                         }
