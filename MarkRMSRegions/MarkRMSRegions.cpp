@@ -607,6 +607,9 @@ namespace {
             // builder.CreateBinOp(Instruction::Add,
             // 		    ConstantInt::get(getGlobalContext(),APInt(32,1)),
             // 		    ConstantInt::get(getGlobalContext(),APInt(32,1)));
+            builder.CreateCall(InlineAsm::get(FunctionType::get(Type::getVoidTy(getGlobalContext()),
+                                                                false),
+                                              "nop","",true));
             builder.CreateRetVoid();
             return toReturn;
         }
