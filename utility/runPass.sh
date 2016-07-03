@@ -46,4 +46,5 @@ opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
 
 opt -S \
     -load $MarkRMSRegionsSo -mark-rms .internal_temp3~ $outputFile
-rm .internal_temp~ .internal_temp2~ .internal_temp3~
+
+rm -f .internal_temp~ .internal_temp2~ .internal_temp3~

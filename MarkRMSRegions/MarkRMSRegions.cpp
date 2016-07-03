@@ -46,6 +46,7 @@
 // #include "llvm/IR/Attributes.h"
 #include "llvm/IR/NoFolder.h"
 #include "llvm/IR/CallSite.h"
+#include "llvm/IR/InlineAsm.h"
 
 // #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/CFG.h"
@@ -157,7 +158,7 @@ namespace {
             BasicBlock::iterator inst = BasicBlock::iterator(start);
             while (inst != parent->end()) {
                 if (auto call = dyn_cast<CallInst>(&*inst)) {
-                    if (call->getCalledFunction() == RMS_Final_Release) {
+                    if (call->getCalledValue()->stripPointerCasts() == RMS_Final_Release) {
                         //Mark it and return
                         if (!enclave)
                             createDummyCall(beginXDRF,call,false,0);

@@ -77,6 +77,10 @@
 using namespace llvm;
 using namespace std;
 
+static cl::opt<int> TRACE_NUMBER ("trace", cl::desc("Specify the number that is used as argument to the xDRF and nDRF markings"),
+                                  cl::value_desc("trace number"),
+                                  cl::init(1));
+
 //static cl::opt<bool> SplitLibrary(
 //    "split-lib",
 //    cl::desc("Enable splitting around library calls"));
@@ -308,15 +312,18 @@ namespace {
             
             for (User *use : bNDRF->users()) {
                 if (auto call = dyn_cast<CallInst>(use)) {
+                    if (dyn_cast<ConstantInt>(dyn_cast<CallInst>(call)->getArgOperand(0))->getZExtValue() != TRACE_NUMBER)
+                        continue;
                     // Figure out if the xDRF pass marks it as xDRF or not.
                     bool xDRF = true;
                     BasicBlock::iterator prevInst = BasicBlock::iterator(call);
                     try {
                         moveIteratorUp(prevInst);
                         if (isa<CallInst>(prevInst) &&
-                            (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == eXDRF) {
+                            (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == eXDRF &&
+                            dyn_cast<ConstantInt>(dyn_cast<CallInst>(prevInst)->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                             //moveIteratorUp(prevInst);
-                            xDRF = false;
+                                xDRF = false;
                         } else {
                             moveIteratorDown(prevInst);
                         }
@@ -330,26 +337,49 @@ namespace {
                     
                     bool aligned = false;
                     bool correct = false;
-                    
-                    //Check for the possible surrounding RMS calls
-                    //Check the instructions within this block before the xDRF call
-                    for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
-                         iter != prevInst->getParent()->rend(); ++iter) {
-                        if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
-                            //Match towards initial acquire
-                            if (call2->getCalledValue()->stripPointerCasts() == RMSIAcq) {
-                                aligned=true;
-                                if (dyn_cast<ConstantInt>(call2->getArgOperandUse(1).get())->getZExtValue() == MONXDRF)
+
+                    if (TRACE_NUMBER == 0) {
+                        for (BasicBlock::iterator iter = BasicBlock::iterator(prevInst);
+                             iter != prevInst->getParent()->end(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards initial acquire
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSIAcq) {
+                                    aligned=true;
+                                    if (dyn_cast<ConstantInt>(call2->getArgOperandUse(1).get())->getZExtValue() == MONXDRF)
+                                        correct=!xDRF;
+                                    else
+                                        correct=xDRF;
+                                    break;
+                                }
+                                //Match towards initial barrier
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSIBar) {
+                                    aligned = true;
                                     correct=!xDRF;
-                                else
-                                    correct=xDRF;
-                                break;
+                                    break;
+                                }
                             }
-                            //Match towards initial barrier
-                            if (call2->getCalledValue()->stripPointerCasts() == RMSIBar) {
-                                aligned = true;
-                                correct=!xDRF;
-                                break;
+                        }
+                    } else {
+                        //Check for the possible surrounding RMS calls
+                        //Check the instructions within this block before the xDRF call
+                        for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
+                             iter != prevInst->getParent()->rend(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards initial acquire
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSIAcq) {
+                                    aligned=true;
+                                    if (dyn_cast<ConstantInt>(call2->getArgOperandUse(1).get())->getZExtValue() == MONXDRF)
+                                        correct=!xDRF;
+                                    else
+                                        correct=xDRF;
+                                    break;
+                                }
+                                //Match towards initial barrier
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSIBar) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -381,6 +411,8 @@ namespace {
             
             for (User *use : eNDRF->users()) {
                 if (auto call = dyn_cast<CallInst>(use)) {
+                    if (dyn_cast<ConstantInt>(dyn_cast<CallInst>(call)->getArgOperand(0))->getZExtValue() != TRACE_NUMBER)
+                        continue;
                     //DEBUG_VERIFY("Checking " << *call << "\n");
                     //DEBUG_VERIFY("BB is " << *(call->getParent()) << "\n");
                     // Figure out if the xDRF pass marks it as xDRF or not.
@@ -389,7 +421,8 @@ namespace {
                     try {
                         moveIteratorDown(prevInst);
                         if (isa<CallInst>(prevInst) &&
-                            (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == bXDRF) {
+                            (dyn_cast<CallInst>(prevInst))->getCalledValue()->stripPointerCasts() == bXDRF &&
+                            dyn_cast<ConstantInt>(dyn_cast<CallInst>(prevInst)->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                             xDRF = false;
                         }
                         moveIteratorUp(prevInst);
@@ -404,7 +437,7 @@ namespace {
                     bool aligned=false;
                     bool correct=false;
 
-                    //Check the instructions WITHIN this block before the xDRF call for initial_acquire
+                    //Check the instructions WITHIN this block before the xDRF call for initial_release
                     for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
                          iter != prevInst->getParent()->rend(); ++iter) {
                         //DEBUG_VERIFY("Checking towards " << *iter << "\n");
@@ -422,16 +455,32 @@ namespace {
                     }
 
                     if (!aligned)  {
-                        //Check the instructions WITHIN this block after the xDRF call for final_barrier
-                        for (BasicBlock::iterator iter = BasicBlock::iterator(prevInst);
-                             iter != prevInst->getParent()->end(); ++iter) {
-                            //DEBUG_VERIFY("Checking towards " << *iter << "\n");
-                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
-                                //Match towards final barrier
-                                if (call2->getCalledValue()->stripPointerCasts() == RMSFBar) {
-                                    aligned = true;
-                                    correct=!xDRF;
-                                    break;
+                        if (TRACE_NUMBER == 0) {
+                            //Check the instructions WITHIN this block after the xDRF call for final_barrier
+                            for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
+                                 iter != prevInst->getParent()->rend(); ++iter) {
+                                //DEBUG_VERIFY("Checking towards " << *iter << "\n");
+                                if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                    //Match towards final barrier
+                                    if (call2->getCalledValue()->stripPointerCasts() == RMSFBar) {
+                                        aligned = true;
+                                        correct=!xDRF;
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            //Check the instructions WITHIN this block after the xDRF call for final_barrier
+                            for (BasicBlock::iterator iter = BasicBlock::iterator(prevInst);
+                                 iter != prevInst->getParent()->end(); ++iter) {
+                                //DEBUG_VERIFY("Checking towards " << *iter << "\n");
+                                if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                    //Match towards final barrier
+                                    if (call2->getCalledValue()->stripPointerCasts() == RMSFBar) {
+                                        aligned = true;
+                                        correct=!xDRF;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -475,7 +524,8 @@ namespace {
                          iter != call->getParent()->end(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards begin_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == bNDRF) {
+                            if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                                 marked=true;
                                 break;
                             }
@@ -510,7 +560,8 @@ namespace {
                          iter != call->getParent()->end(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards end_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == eNDRF) {
+                            if (call2->getCalledValue()->stripPointerCasts() == eNDRF &&
+                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                                 marked=true;
                                 break;
                             }
@@ -542,7 +593,8 @@ namespace {
                          iter != call->getParent()->end(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards begin_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == bNDRF) {
+                            if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                                 marked=true;
                                 break;
                             }
@@ -569,7 +621,8 @@ namespace {
                          iter != call->getParent()->rend(); ++iter) {
                         if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
                             //Match towards begin_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == eNDRF) {
+                            if (call2->getCalledValue()->stripPointerCasts() == eNDRF &&
+                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                                 marked=true;
                                 break;
                             }

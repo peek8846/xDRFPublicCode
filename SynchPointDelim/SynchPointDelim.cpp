@@ -97,7 +97,13 @@ using namespace std;
 static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for synchpoint graph"),
                                    cl::value_desc("filename"));
 
-
+static cl::opt<AliasResult> SVALIASLEVEL("svaalevel",cl::desc("The required aliasing level to detect that two synchronization variables are the same"),
+                                         cl::init(PartialAlias),
+                                         cl::values(clEnumVal(NoAlias,"All loads and stores will conflict"),
+                                                    clEnumVal(MayAlias,"All loads and stores not proven to noconflict will conflict"),
+                                                    clEnumVal(PartialAlias,"Only loads and stores that might overlap will conflict"),
+                                                    clEnumVal(MustAlias,"Only loads and stores that are proven to point to the same location will conflict"),
+                                                    clEnumValEnd));
 
 namespace {
 
@@ -187,16 +193,12 @@ namespace {
             SmallPtrSet<Function*,4> entrypoints;
 
             wM=&M;
-            aacombined = new AliasCombiner(&M,true,this,PartialAlias);
+            aacombined = new AliasCombiner(&M,true,this,SVALIASLEVEL);
             //aacombined->addAliasResult(&aa);
             
             //Find what functions use synchronizations, this can optimize searching later
             determineSynchronizedFunctions();
             
-            for (Function * fun : synchronizedFunctions) {
-                VERBOSE_PRINT(fun->getName() << " might synchronize\n");
-            }
-
             //Find the "main" function
             Function *main = M.getFunction("main");
             if (!main) {
@@ -1456,10 +1458,19 @@ namespace {
                         continue;
                     }
                     
-                    CriticalRegion *critRegion = currState.nextPoint->critRegion;
+                    //CriticalRegion *critRegion = currState.nextPoint->critRegion;
+                    CriticalRegion *critRegion = NULL;
+
+                    for (CriticalRegion *tRegion : criticalRegions) {
+                        if (tRegion->entrySynchPoints.count(currState.nextPoint) != 0) {
+                            critRegion = tRegion;
+                            break;
+                        }
+                    }
+                    
                     //If it's the first time we handled this synch point, create a new
                     //critical section for it
-                    if (currState.nextPoint->critRegion == NULL) {
+                    if (critRegion == NULL) {
                         critRegion = new CriticalRegion;
                         currState.nextPoint->critRegion = critRegion;
                         criticalRegions.insert(critRegion);
@@ -1495,7 +1506,8 @@ namespace {
                     //We are in a critical region, handle synchpoint accordingly
                     CriticalRegion* critRegion = currState.currRegion;
                     if (currState.nextPoint->critRegion != NULL) {
-                        if (currState.nextPoint->critRegion != critRegion) {
+                        //DISABLED, "critRegion" structure is broken, and we do not want to merge regardless
+                        if (false && currState.nextPoint->critRegion != critRegion) {
                             critRegion->mergeWith(currState.nextPoint->critRegion);
                             criticalRegions.erase(critRegion);
                             //LIGHT_PRINT("Replacing " << critRegion->ID << " with " << currState.nextPoint->critRegion->ID << "\n");
@@ -1595,36 +1607,46 @@ namespace {
             //     }
             // }
 
+            VERBOSE_PRINT("Determining functions that might synchronize...\n");
+            
             //This is the new, slower, way of doing this which correctly
             //detects inline asm that synchronizes
+            DEBUG_PRINT("Finding bottom-level synchronizing calls\n");
             for (auto fun = wM->begin();
                  fun != wM->end();
                  ++fun) {
                 for (auto inst = inst_begin(&*fun);
                      inst  != inst_end(&*fun);
                      ++inst) {
-                    if (isSynch(&*inst))
+                    if (isSynch(&*inst)) {
                         pthUsersQueue.push_back(&*inst);
+                        DEBUG_PRINT(*inst << " is a bottom-level synchronizing call\n");
+                    }
                 }
             }
+
+            DEBUG_PRINT("Searching upwards from bottom level to find any function that might synchronize\n");
             
             while (!pthUsersQueue.empty()) {
                 Value *nextVal = pthUsersQueue.front(); pthUsersQueue.pop_front();
                 //If we have previously handled this value, skip it
                 if (!(visitedValues.insert(nextVal).second))
                     continue;
-                LIGHT_PRINT("Handling the value: " << nextVal->getName() << "\n");
+                if (isa<Function>(nextVal) || isa<BasicBlock>(nextVal))
+                    LIGHT_PRINT("Handling the value: " << nextVal->getName() << "\n");
+                else
+                    LIGHT_PRINT("Handling the value: " << *nextVal << "\n");
                 //Otherwise, if this value is an instruction, add the function it is
                 //in to the synchronized functions. And add the users of that function
                 //to the queue. If the function is previously handled then skip
                 //adding the users of that function
                 if (Instruction *user = dyn_cast<Instruction>(nextVal)) {
-                LIGHT_PRINT("Was an instruction, adding parent: " << user->getParent()->getParent()->getName() << " as synchronized and adding the users of that function to the queue if it is not already handled\n");
+                    LIGHT_PRINT("Was an instruction, adding parent: " << user->getParent()->getParent()->getName() << " as synchronized and adding the users of that function to the queue if it is not already handled\n");
                     
                     //If the instruction is a call, additionally track the called function
                     SmallPtrSet<Function*,1> calledFuns = getCalledFuns(user);
                     for (Function *cFun : calledFuns) {
-                        LIGHT_PRINT(cFun->getName() << " is gonna be tracked probs\n");
+                        //LIGHT_PRINT(cFun->getName() << " is gonna be tracked probs\n");
                         pthUsersQueue.push_back(cFun);
                         // CallSite call(user);
                         // for (int i = 0; i < call.getNumArgOperands(); ++i) {
@@ -1638,18 +1660,25 @@ namespace {
                     }
                     
                     Function *inFunction=user->getParent()->getParent();
-                    if (!(synchronizedFunctions.insert(inFunction).second))
+                    if (!(synchronizedFunctions.insert(inFunction).second)) {
+                        DEBUG_PRINT("Function already tracked as synchronized, users not tracked\n");
                         continue;
+                    }
                     for (auto uI = inFunction->users().begin(); uI != inFunction->users().end(); ++uI) {
-                        LIGHT_PRINT("Added " << uI->getName() << " as synchronized\n");
+                        if (isa<Function>(*uI) || isa<BasicBlock>(*uI))
+                            LIGHT_PRINT("Added " << (*uI)->getName() << " to synch queue\n");
+                        else
+                            LIGHT_PRINT("Added " << **uI << " to synch queue\n");    
                         pthUsersQueue.push_back(*uI);
                     }                    
-                } 
-                //If the value is not an instruction, add the users of it to the queue
+                }
+                //If the value is a function, just add it directly
                 else if (Function *fun = dyn_cast<Function>(nextVal)) {
                     LIGHT_PRINT("Was a function, adding it to synchronized functions\n");
+                    //Add callers of the function
                     synchronizedFunctions.insert(fun);
-                } 
+                }
+                //If the value is not an instruction, add the users of it to the queue
                 else {
                     LIGHT_PRINT("Was not an instruction, adding users to queue\n");
                     for (auto uI = nextVal->users().begin(); uI != nextVal->users().end(); ++uI) {
@@ -1657,6 +1686,13 @@ namespace {
                     }                    
                 }
             }
+
+            VERBOSE_PRINT("Done\n");
+            
+            for (Function * fun : synchronizedFunctions) {
+                VERBOSE_PRINT(fun->getName() << " might synchronize\n");
+            }
+
         }
 
         map<Function*,SmallPtrSet<Instruction*,128> > getExecutableInstsDynamic;

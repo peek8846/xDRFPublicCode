@@ -32,6 +32,9 @@
 //Debug should more accurately print exactly what is happening
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
+//Functions that should never be considered for tracking
+set<StringRef> noAnalyzeFunctions = {"begin_NDRF","end_NDRF","begin_XDRF","end_XDRF"};
+
 class AliasCombiner {
   
 public:
@@ -56,7 +59,7 @@ public:
 
     //If any alias analysis says they do not alias, this returns false. Otherwise returns true.
     //More specifically, if we can for each argument to the instruction find atleast one proof it does not alias
-    //then we're fine
+    //then we say it does not alias
     bool MayConflict(Instruction *ptr1, Instruction *ptr2) {
         DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
         bool toReturn=false;
@@ -154,7 +157,7 @@ public:
     // }
 
     //If any alias analysis says they must alias, this returns true. Otherwise returns false
-    //more specifically, for each argument we need to prove it does not alias t return false
+    //more specifically, for each argument we need to prove it does not alias, and if we can then we return false
     bool MustConflict(Instruction *ptr1, Instruction *ptr2) {
         DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are aliasing under any analysis\n");
         bool toReturn=false;
@@ -547,7 +550,8 @@ private:
                 alreadyVisited.insert(nextValue);
                 //Try to resolve the value into a function
                 if (auto fun = dyn_cast<Function>(nextValue)) {
-                    toReturn.insert(fun);
+                    if (noAnalyzeFunctions.count(fun->getName()) == 0)
+                        toReturn.insert(fun);
                 }
                 //Since we are dealing with functions, only a few
                 //instructions should be possible

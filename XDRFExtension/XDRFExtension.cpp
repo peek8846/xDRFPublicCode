@@ -86,7 +86,7 @@
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
 //Shorthand for checking whether two accesses conflict
-#define MAYCONFLICT(X,Y) ((isa<StoreInst>(X) || isa<StoreInst>(Y)) && aacombined->MayConflict(X,Y))
+//#define MAYCONFLICT(X,Y) ((isa<StoreInst>(X) || isa<StoreInst>(Y)) && aacombined->MayConflict(X,Y))
 
 using namespace llvm;
 using namespace std;
@@ -95,6 +95,10 @@ static cl::opt<string> graphOutput2("g2", cl::desc("Specify output dot file for 
                                     cl::value_desc("filename"));
 
 static cl::opt<bool> skipConflictStore("nostore",cl::desc("Do not store data access conflict info"));
+
+static cl::opt<bool> pruneSurroundingSets("ano",cl::desc("Assume that any instruction inside an nDRF region cannot conflict with other instructions when also encountered in an xDRF region"));
+
+static cl::opt<bool> noCycleDRFAliasing("adcs",cl::desc("Assume that instructions in DRF regions within cycles in the synchronization point graph cannot conflict with instructions within the same cycle"));
 
 static cl::opt<AliasResult> ALIASLEVEL("aalevel",cl::desc("The required aliasing level to detect a conflict"),
                                        cl::init(MustAlias),
@@ -233,6 +237,38 @@ namespace {
         SmallPtrSet<nDRFRegion*,4> nDRFRegions;
         SmallPtrSet<xDRFRegion*,6> xDRFRegions;
 
+        SmallPtrSet<Instruction*,128> instructionsInNDRF;
+
+        void pruneSurroundingsFromNDRFs() {
+            VERBOSE_PRINT("Enabled assumed ndrf no alias assumption\n");
+            for (nDRFRegion* region : nDRFRegions) {
+                for (Instruction* inst : region->containedInstructions) {
+                    instructionsInNDRF.insert(inst);
+                }
+            }
+            VERBOSE_PRINT(instructionsInNDRF.size() << " instructions will be ignored during collision detection\n");
+            for (nDRFRegion* region : nDRFRegions) {
+                for (nDRFRegion* regionto : region->precedingRegions) {
+                    for (auto iter = region->precedingInstructions[regionto].begin();
+                         iter != region->precedingInstructions[regionto].end();) {
+                        Instruction* toDelete = *(iter++);
+                        if (instructionsInNDRF.count(toDelete) > 0) {
+                            region->precedingInstructions[regionto].erase(toDelete);
+                        }
+                    }
+                }
+                for (nDRFRegion* regionto : region->followingRegions) {
+                    for (auto iter = region->followingInstructions[regionto].begin();
+                         iter != region->followingInstructions[regionto].end();) {
+                        Instruction* toDelete = *(iter++);
+                        if (instructionsInNDRF.count(toDelete) > 0) {
+                            region->followingInstructions[regionto].erase(toDelete);
+                        }
+                    }
+                }
+            }
+        }
+        
         void setupNDRFRegions(SynchPointDelim &syncdelimited) {
             map<SynchronizationVariable*,SmallPtrSet<nDRFRegion*,2> > nDRFRegionsSynchsOn;
             map<SynchronizationPoint*,nDRFRegion*> regionOfPoint;
@@ -334,6 +370,8 @@ namespace {
                 }
                 nDRFRegions.insert(newRegion);
             }
+            if (pruneSurroundingSets)
+                pruneSurroundingsFromNDRFs();
         }
 
         void printnDRFRegionGraph(Module &M) {
@@ -357,7 +395,122 @@ namespace {
             }
         }
 
-
+        //Utility: Returns the proper type of a pointer type
+        Type *getTypeOfPointerType(Type *ptr) {
+            while (PointerType *p = dyn_cast<PointerType>(ptr))
+                ptr = p->getElementType();
+            return ptr;
+        }
+        
+        SmallPtrSet<Function*,1> getCalledFuns(Instruction *inst) {
+            SmallPtrSet<Function*,1> toReturn;
+            SmallPtrSet<Value*,8> alreadyVisited;
+            if (isCallSite(inst)) {
+                CallSite call = CallSite(inst);
+                Value *calledValue = call.getCalledValue();
+                //Rather than doing this: would it be possible with a decent AA to just
+                //check if the value aliases with each function in the module?
+                deque<Value*> calledValues;
+                calledValues.push_back(calledValue);
+                while (!calledValues.empty()) {
+                    Value *nextValue = calledValues.front();
+                    calledValues.pop_front();
+                    nextValue = nextValue->stripInBoundsConstantOffsets();
+                    if (alreadyVisited.count(nextValue) != 0)
+                        continue;
+                    alreadyVisited.insert(nextValue);
+                    //Try to resolve the value into a function
+                    if (auto fun = dyn_cast<Function>(nextValue)) {
+                        if (noAnalyzeFunctions.count(fun->getName()) == 0)
+                            toReturn.insert(fun);
+                    }
+                    //Since we are dealing with functions, only a few
+                    //instructions should be possible
+                    else if (auto phi = dyn_cast<PHINode>(nextValue))
+                        for (int i = 0; i < phi->getNumIncomingValues(); ++i)
+                            calledValues.push_back(phi->getIncomingValue(i));
+                    else if (dyn_cast<Instruction>(nextValue) && isCallSite(dyn_cast<Instruction>(nextValue))) {
+                        //We get the return from a function, find all values
+                        //that could be returned from that function
+                        //and toss them onto the queue
+                        //TODO: Do we need to handle the case where functions are
+                        //returned recursively?
+                        //For now, ignore it
+                        SmallPtrSet<Function*,1> calledFuns = getCalledFuns(dyn_cast<Instruction>(nextValue));
+                        for (Function* fun : calledFuns) {
+                            for (auto instb = inst_begin(fun);
+                                 instb != inst_end(fun); ++instb) {
+                                if (auto returninst = dyn_cast<ReturnInst>(&*instb)) {
+                                    if (Value* returnval = returninst->getReturnValue())
+                                        calledValues.push_back(returnval);
+                                }
+                            }
+                        }
+                    }
+                
+                    //Here we pick apart data structures
+                    else if (auto gep = dyn_cast<GetElementPtrInst>(nextValue)) {
+                        //Any remaining gep must, by definition, have a dynamic index
+                        //So we just resolve the value that is gepped from
+                        calledValues.push_back(gep->getPointerOperand());
+                    }
+                    else if (auto load = dyn_cast<LoadInst>(nextValue)) {
+                        calledValues.push_back(load->getPointerOperand());
+                    }
+                    else if (auto arg = dyn_cast<Argument>(nextValue)) {
+                        //Track values from the callsites
+                        for (auto use = arg->getParent()->users().begin();
+                             use != arg->getParent()->users().end();
+                             ++use) {
+                            if (dyn_cast<Instruction>(*use) && isCallSite(dyn_cast<Instruction>(*use))) {
+                                CallSite callsite(*use);
+                                calledValues.push_back(callsite.getArgOperand(arg->getArgNo()));
+                            }
+                        }
+                    }
+                    else if (auto glob = dyn_cast<GlobalVariable>(nextValue)) {
+                        //at this point we can basically give up, any function
+                        //that has its adress taken can be used here
+                        for (Function &fun : inst->getParent()->getParent()->getParent()->getFunctionList()) {
+                            if (fun.hasAddressTaken()) {
+                                if (fun.getFunctionType() == dyn_cast<FunctionType>(getTypeOfPointerType(glob->getType()))) {
+                                    toReturn.insert(&fun);
+                                }
+                            }
+                        }
+                    } else {
+                        //We failed to resolve function to be called. Print diagnostic message
+                        // VERBOSE_PRINT("Failed to resolve value: " << *nextValue
+                        //               << "\nwhich has type: " << typeid(*nextValue).name()
+                        //               << "\nwhile resolving called functions.\n");
+                    }                    
+                }
+            }
+            return toReturn;
+        }
+        
+        bool MAYCONFLICT(Instruction* X, Instruction* Y) {
+            if (!isa<StoreInst>(X) && !isa<CallInst>(X)) {
+                bool XcanBeWritingFun=false;
+                bool YcanBeWritingFun=false;
+                for (Function *fun : getCalledFuns(X)) {
+                    if (!fun->onlyReadsMemory()) {
+                        XcanBeWritingFun=true;
+                        break;
+                    }
+                }
+                for (Function *fun : getCalledFuns(Y)) {
+                    if (!fun->onlyReadsMemory()) {
+                        YcanBeWritingFun=true;
+                        break;
+                    }
+                }
+                if (!XcanBeWritingFun && !YcanBeWritingFun)
+                    return false;
+            }
+            return aacombined->MayConflict(X,Y);
+        }
+        
         //Returns a pair:
         //first = instructions to check towards
         //Second = regions that follow us
@@ -387,10 +540,11 @@ namespace {
                 pair<SmallPtrSet<Instruction*,64>, SmallPtrSet<nDRFRegion*,2> > recursiveCompareAgainst = extendDRFRegion(region);
                 toCompareAgainst.insert(recursiveCompareAgainst.first.begin(),
                                         recursiveCompareAgainst.first.end());
+                
                 followingRegions.insert(recursiveCompareAgainst.second.begin(),
                                         recursiveCompareAgainst.second.end());
             }
-
+            
             //Obtain the instructions to compare from regions that synch with us
             for (nDRFRegion * region : regionToExtend->synchsWith) {
                 pair<SmallPtrSet<Instruction*,64>, SmallPtrSet<nDRFRegion*,2> > recursiveCompareAgainst = extendDRFRegion(region);
@@ -399,6 +553,7 @@ namespace {
                                         recursiveCompareAgainst.first.end());
                 followingRegions.insert(recursiveCompareAgainst.second.begin(),
                                         recursiveCompareAgainst.second.end());
+                
             }
 
             //Handle special cases, signals and waits are never xDRF
@@ -508,7 +663,7 @@ namespace {
                     if (follow)
                         VERBOSE_PRINT("   " << follow->ID << "\n");
                     else
-                        VERBOSE_PRINT("   Thread Entry\n");
+                        VERBOSE_PRINT("   Thread Exit\n");
                 }
                 VERBOSE_PRINT("  Conflicts across region:\n");
                 for (pair<Instruction*,Instruction*> conflict : region->conflictsBetweenDRF) {
