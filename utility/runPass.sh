@@ -37,12 +37,12 @@ opt -S \
     $targetFile -o .internal_temp~
 
 opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-    $AAs -SPDelim -XDRFextend -aalevel MustAlias -MarkXDRF -trace 1 $@\
-    .internal_temp~ -o .internal_temp2~
+     $AAs -SPDelim -XDRFextend -aalevel MustAlias -MarkXDRF -trace 1 $@\
+     .internal_temp~ -o .internal_temp2~
 
 opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-    $AAs -SPDelim -XDRFextend -aalevel MayAlias -MarkXDRF -trace 2 $@\
-    .internal_temp2~ -o .internal_temp3~
+     $AAs -SPDelim -XDRFextend -aalevel MayAlias -MarkXDRF -trace 2 $@\
+     .internal_temp2~ -o .internal_temp3~
 
 opt -S \
     -load $MarkRMSRegionsSo -mark-rms .internal_temp3~ $outputFile
