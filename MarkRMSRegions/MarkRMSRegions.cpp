@@ -600,7 +600,9 @@ namespace {
                                                      FunctionType::get(Type::getVoidTy(getGlobalContext()),
                                                                        true)));
             toReturn->addFnAttr(Attribute::NoInline);
-            toReturn->addFnAttr(Attribute::OptimizeNone);
+            toReturn->addFnAttr(Attribute::NoUnwind);
+            toReturn->addFnAttr(Attribute::UWTable);
+            //toReturn->addFnAttr(Attribute::OptimizeNone);
             BasicBlock *block = BasicBlock::Create(getGlobalContext(),
                                                    "entry", toReturn);
             IRBuilder<true, NoFolder> builder(block);
@@ -610,7 +612,7 @@ namespace {
             // 		    ConstantInt::get(getGlobalContext(),APInt(32,1)));
             builder.CreateCall(InlineAsm::get(FunctionType::get(Type::getVoidTy(getGlobalContext()),
                                                                 false),
-                                              "nop","",true));
+                                              "nop","~{dirflag},~{fpsr},~{flags}",true));
             builder.CreateRetVoid();
             return toReturn;
         }
