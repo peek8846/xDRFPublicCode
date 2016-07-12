@@ -98,6 +98,8 @@ namespace {
       
         virtual bool runOnModule(Module &M) {
 
+            VERBOSE_PRINT("Marking RMS calls in " << M.getName() << "\n");
+
             SmallPtrSet<Function*,4> entrypoints;
 
             //Find the "main" function
@@ -147,8 +149,7 @@ namespace {
         Function *beginXDRF;
         Function *endXDRF;
 
-        SmallPtrSet<BasicBlock*,1> visited_acqrelease;
-        void markNextFinalRelease(Module &M,Instruction *start,bool enclave) {
+        void markNextFinalRelease(Module &M,Instruction *start,bool enclave,SmallPtrSet<BasicBlock*,1>& visited_acqrelease) {
             Function * RMS_Final_Release = M.getFunction("RMS_Final_Release");
             assert(RMS_Final_Release && "Module contains RMS_Initial_Acq but not RMS_Final_Release");
             BasicBlock *parent = start->getParent();
@@ -175,7 +176,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalRelease(M,&*(succ->begin()),enclave);
+                markNextFinalRelease(M,&*(succ->begin()),enclave,visited_acqrelease);
         }
 
         void markInitialAcq(Module &M) {
@@ -194,13 +195,13 @@ namespace {
                     if (!enclave)
                         createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalRelease(M,call,enclave);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalRelease(M,call,enclave,temp);
                 }
             }
         }
 
-        SmallPtrSet<BasicBlock*,1> visited_barrier;
-        void markNextFinalBarrier(Module &M,Instruction *start) {
+        void markNextFinalBarrier(Module &M,Instruction *start,SmallPtrSet<BasicBlock*,1>& visited_barrier) {
             Function * RMS_Final_Barrier = M.getFunction("RMS_Final_Barrier");
             assert(RMS_Final_Barrier && "Module contains RMS_Initial_Barrier but not RMS_Final_Barrier");
             BasicBlock *parent = start->getParent();
@@ -226,7 +227,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalBarrier(M,&*(succ->begin()));
+                markNextFinalBarrier(M,&*(succ->begin()),visited_barrier);
         }
 
         void markInitialBarrier(Module &M) {
@@ -241,13 +242,13 @@ namespace {
                     //Mark it
                     createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalBarrier(M,call);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalBarrier(M,call,temp);
                 }
             }
         }
 
-        SmallPtrSet<BasicBlock*,1> visited_atomic_acq;
-        void markNextFinalAtomicAcq(Module &M,Instruction *start,bool enclave) {
+        void markNextFinalAtomicAcq(Module &M,Instruction *start,bool enclave, SmallPtrSet<BasicBlock*,1>& visited_atomic_acq) {
             Function * RMS_Final_Atomic_Acq = M.getFunction("RMS_Final_Atomic_Acq");
             assert(RMS_Final_Atomic_Acq && "Module contains RMS_Initial_Atomic_Acq but not RMS_Final_Atomic_Acq");
             BasicBlock *parent = start->getParent();
@@ -274,7 +275,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalAtomicAcq(M,&*(succ->begin()),enclave);
+                markNextFinalAtomicAcq(M,&*(succ->begin()),enclave,visited_atomic_acq);
         }
 
         void markInitialAtomicAcq(Module &M) {
@@ -296,13 +297,13 @@ namespace {
                     if (!enclave)
                         createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalAtomicAcq(M,call,enclave);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalAtomicAcq(M,call,enclave,temp);
                 }
             }
         }
 
-        SmallPtrSet<BasicBlock*,1> visited_atomic_release;
-        void markNextFinalAtomicRelease(Module &M,Instruction *start,bool enclave) {
+        void markNextFinalAtomicRelease(Module &M,Instruction *start,bool enclave, SmallPtrSet<BasicBlock*,1>& visited_atomic_release) {
             Function * RMS_Final_Atomic_Release = M.getFunction("RMS_Final_Atomic_Release");
             assert(RMS_Final_Atomic_Release && "Module contains RMS_Initial_Atomic_Release but not RMS_Final_Atomic_Release");
             BasicBlock *parent = start->getParent();
@@ -330,7 +331,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalAtomicRelease(M,&*(succ->begin()),enclave);
+                markNextFinalAtomicRelease(M,&*(succ->begin()),enclave,visited_atomic_release);
         }
 
         void markInitialAtomicRelease(Module &M) {
@@ -352,18 +353,18 @@ namespace {
                     if (!enclave)
                         createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalAtomicRelease(M,call,enclave);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalAtomicRelease(M,call,enclave,temp);
                 }
             }
         }
 
-        SmallPtrSet<BasicBlock*,1> visited_atomic_acqrel;
-        void markNextFinalAtomicAcqRel(Module &M,Instruction *start,bool enclave) {
+        void markNextFinalAtomicAcqRel(Module &M,Instruction *start,bool enclave, SmallPtrSet<BasicBlock*,1>& visited_atomic_acqrel) {
             Function * RMS_Final_Atomic_AcqRel = M.getFunction("RMS_Final_Atomic_AcqRel");
             assert(RMS_Final_Atomic_AcqRel && "Module contains RMS_Initial_Atomic_AcqRel but not RMS_Final_Atomic_AcqRel");
             BasicBlock *parent = start->getParent();
             //If someone previously handled this basicblock, return
-            if (!(visited_atomic_release.insert(parent).second))
+            if (!(visited_atomic_acqrel.insert(parent).second))
                 return;
             BasicBlock::iterator inst = BasicBlock::iterator(start);
             while (inst != parent->end()) {
@@ -386,7 +387,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalAtomicAcqRel(M,&*(succ->begin()),enclave);
+                markNextFinalAtomicAcqRel(M,&*(succ->begin()),enclave,visited_atomic_acqrel);
         }
 
         void markInitialAtomicAcqRel(Module &M) {
@@ -408,18 +409,18 @@ namespace {
                     if (!enclave)
                         createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalAtomicAcqRel(M,call,enclave);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalAtomicAcqRel(M,call,enclave,temp);
                 }
             }
         }
 
-        SmallPtrSet<BasicBlock*,1> visited_semwait;
-        void markNextFinalSemWait(Module &M,Instruction *start) {
+        void markNextFinalSemWait(Module &M,Instruction *start, SmallPtrSet<BasicBlock*,1>& visited_sem_wait) {
             Function * RMS_Final_SemWait = M.getFunction("RMS_Final_SemWait");
             assert(RMS_Final_SemWait && "Module contains RMS_Initial_SemWait but not RMS_Final_SemWait");
             BasicBlock *parent = start->getParent();
             //If someone previously handled this basicblock, return
-            if (!(visited_atomic_release.insert(parent).second))
+            if (!(visited_sem_wait.insert(parent).second))
                 return;
             BasicBlock::iterator inst = BasicBlock::iterator(start);
             while (inst != parent->end()) {
@@ -441,7 +442,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalSemWait(M,&*(succ->begin()));
+                markNextFinalSemWait(M,&*(succ->begin()),visited_sem_wait);
         }
 
         void markInitialSemWait(Module &M) {
@@ -456,18 +457,18 @@ namespace {
                     //Mark it
                     createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalSemWait(M,call);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalSemWait(M,call,temp);
                 }
             }
         }
 
-        SmallPtrSet<BasicBlock*,1> visited_semsignal;
-        void markNextFinalSemSignal(Module &M,Instruction *start) {
+        void markNextFinalSemSignal(Module &M,Instruction *start, SmallPtrSet<BasicBlock*,1>& visited_sem_signal) {
             Function * RMS_Final_SemSignal = M.getFunction("RMS_Final_SemSignal");
             assert(RMS_Final_SemSignal && "Module contains RMS_Initial_SemSignal but not RMS_Final_SemSignal");
             BasicBlock *parent = start->getParent();
             //If someone previously handled this basicblock, return
-            if (!(visited_atomic_release.insert(parent).second))
+            if (!(visited_sem_signal.insert(parent).second))
                 return;
             BasicBlock::iterator inst = BasicBlock::iterator(start);
             while (inst != parent->end()) {
@@ -489,7 +490,7 @@ namespace {
             for (auto succ = succ_begin(parent);
                  succ != succ_end(parent);
                  ++succ)
-                markNextFinalSemSignal(M,&*(succ->begin()));
+                markNextFinalSemSignal(M,&*(succ->begin()),visited_sem_signal);
         }
 
         void markInitialSemSignal(Module &M) {
@@ -504,7 +505,8 @@ namespace {
                     //Mark it
                     createDummyCall(endXDRF,call,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,TRACE_NUMBER);
-                    markNextFinalSemSignal(M,call);
+                    SmallPtrSet<BasicBlock*,1> temp;
+                    markNextFinalSemSignal(M,call,temp);
                 }
             }
         }
