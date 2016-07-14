@@ -604,7 +604,7 @@ namespace {
             toReturn->addFnAttr(Attribute::NoInline);
             toReturn->addFnAttr(Attribute::NoUnwind);
             toReturn->addFnAttr(Attribute::UWTable);
-            //toReturn->addFnAttr(Attribute::OptimizeNone);
+            toReturn->addFnAttr(Attribute::OptimizeNone);
             BasicBlock *block = BasicBlock::Create(getGlobalContext(),
                                                    "entry", toReturn);
             IRBuilder<true, NoFolder> builder(block);
