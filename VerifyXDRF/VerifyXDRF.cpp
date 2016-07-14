@@ -357,6 +357,18 @@ namespace {
                                     correct=!xDRF;
                                     break;
                                 }
+                                //Match towards initial semaphore signal
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSISSig) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
+                                //Match towards initial semaphore wait
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSISWait) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
                             }
                         }
                     } else {
@@ -376,6 +388,18 @@ namespace {
                                 }
                                 //Match towards initial barrier
                                 if (call2->getCalledValue()->stripPointerCasts() == RMSIBar) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
+                                //Match towards initial semaphore signal
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSISSig) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
+                                //Match towards initial semaphore wait
+                                if (call2->getCalledValue()->stripPointerCasts() == RMSISWait) {
                                     aligned = true;
                                     correct=!xDRF;
                                     break;
@@ -402,7 +426,7 @@ namespace {
                         else
                             unalignedNENCAcq++;
                     }
-                    //VERBOSE_VERIFY((*call) << " - marked: " << (xDRF ? "enclave" : "non-enclave") << " aligned: " << (aligned ? "true" : "false") << " correct: " << (correct ? "true" : "false") << "\n");
+                    VERBOSE_VERIFY((*call) << " in " << call->getParent()->getName() << " - marked: " << (xDRF ? "enclave" : "non-enclave") << " aligned: " << (aligned ? "true" : "false") << " correct: " << (correct ? "true" : "false") << "\n");
                 }
             }
         }
@@ -449,6 +473,18 @@ namespace {
                                     correct=!xDRF;
                                 else
                                     correct=xDRF;
+                                break;
+                            }
+                            //Match towards initial semaphore signal
+                            if (call2->getCalledValue()->stripPointerCasts() == RMSISSig) {
+                                aligned = true;
+                                correct=!xDRF;
+                                break;
+                            }
+                            //Match towards initial semaphore wait
+                            if (call2->getCalledValue()->stripPointerCasts() == RMSISWait) {
+                                aligned = true;
+                                correct=!xDRF;
                                 break;
                             }
                         }
@@ -504,7 +540,7 @@ namespace {
                         else
                             unalignedNENCRel++;
                     }
-                    //VERBOSE_VERIFY((*call) << " - marked: " << (xDRF ? "enclave" : "non-enclave") << " aligned: " << (aligned ? "true" : "false") << " correct: " << (correct ? "true" : "false") << "\n");
+                    VERBOSE_VERIFY((*call) << " in " << call->getParent()->getName() << " - marked: " << (xDRF ? "enclave" : "non-enclave") << " aligned: " << (aligned ? "true" : "false") << " correct: " << (correct ? "true" : "false") << "\n");
                 }
             }
         }
@@ -518,26 +554,40 @@ namespace {
                         xDRF = false;
                     bool marked = false;
 
-
-                    //Check the instructions WITHIN this block after the marking for compiler markings
-                    for (BasicBlock::iterator iter = BasicBlock::iterator(call);
-                         iter != call->getParent()->end(); ++iter) {
-                        if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
-                            //Match towards begin_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
-                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
-                                marked=true;
-                                break;
+                    if (TRACE_NUMBER == 0) {
+                        //Check the instructions WITHIN this block before the marking for compiler markings
+                        for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(BasicBlock::iterator(call));
+                             iter != call->getParent()->rend(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards begin_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                    dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
+                                    marked=true;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        //Check the instructions WITHIN this block after the marking for compiler markings
+                        for (BasicBlock::iterator iter = BasicBlock::iterator(call);
+                             iter != call->getParent()->end(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards begin_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                    dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
+                                    marked=true;
+                                    break;
+                                }
                             }
                         }
                     }
 
                     if (!marked) {
                         if (xDRF) {
-                            //VERBOSE_VERIFY("Detected fXnm in bb: " << call->getParent()->getName() << "\n");
+                            VERBOSE_VERIFY("Detected fXnm in bb: " << call->getParent()->getName() << "\n");
                             unalignedRMSENCAcq++;
                         } else {
-                            //VERBOSE_VERIFY("Detected fNXnm in bb: " << call->getParent()->getName() << "\n");   
+                            VERBOSE_VERIFY("Detected fNXnm in bb: " << call->getParent()->getName() << "\n");   
                             unalignedRMSNENCAcq++;
                         }
                     }
@@ -588,15 +638,30 @@ namespace {
 
                     bool marked = false;
 
-                    //Check the instructions WITHIN this block after the marking for compiler markings
-                    for (BasicBlock::iterator iter = BasicBlock::iterator(call);
-                         iter != call->getParent()->end(); ++iter) {
-                        if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
-                            //Match towards begin_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
-                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
-                                marked=true;
-                                break;
+                    if (TRACE_NUMBER == 0) {
+                        //Check the instructions WITHIN this block before the marking for compiler markings
+                        for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(BasicBlock::iterator(call));
+                             iter != call->getParent()->rend(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards begin_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                    dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
+                                    marked=true;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        //Check the instructions WITHIN this block after the marking for compiler markings
+                        for (BasicBlock::iterator iter = BasicBlock::iterator(call);
+                             iter != call->getParent()->end(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards begin_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                    dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
+                                    marked=true;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -616,15 +681,30 @@ namespace {
 
                     bool marked = false;
 
-                    //Check the instructions WITHIN this block for compiler markings
-                    for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(BasicBlock::iterator(call));
-                         iter != call->getParent()->rend(); ++iter) {
-                        if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
-                            //Match towards begin_ndrf
-                            if (call2->getCalledValue()->stripPointerCasts() == eNDRF &&
-                                dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
-                                marked=true;
-                                break;
+                    if (TRACE_NUMBER == 0) {
+                        //Check the instructions WITHIN this block after the marking for compiler markings
+                        for (BasicBlock::iterator iter = BasicBlock::iterator(call);
+                             iter != call->getParent()->end(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards begin_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                    dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
+                                    marked=true;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        //Check the instructions WITHIN this block for compiler markings
+                        for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(BasicBlock::iterator(call));
+                             iter != call->getParent()->rend(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards begin_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == eNDRF &&
+                                    dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
+                                    marked=true;
+                                    break;
+                                }
                             }
                         }
                     }
