@@ -585,7 +585,7 @@ namespace {
                         for (Instruction * instIn : region->containedInstructions) {
                             if (MAYCONFLICT(instPre,instIn)) {
                                 if (!skipConflictStore)
-                                    region->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
+                                    regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
                                 DEBUG_PRINT("Found conflict between preceding DRF and following nDRF regions\n");
                                 conflict=true;
                             }
