@@ -667,7 +667,7 @@ namespace {
                     }
 
                     if (!marked) {
-                        //VERBOSE_VERIFY("Detected fNXnm in bb: " << call->getParent()->getName() << "\n");   
+                        VERBOSE_VERIFY("Detected fNXnm in bb: " << call->getParent()->getName() << "\n");   
                         unalignedRMSBarrAcq++;
                     }
                 }
@@ -686,8 +686,8 @@ namespace {
                         for (BasicBlock::iterator iter = BasicBlock::iterator(call);
                              iter != call->getParent()->end(); ++iter) {
                             if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
-                                //Match towards begin_ndrf
-                                if (call2->getCalledValue()->stripPointerCasts() == bNDRF &&
+                                //Match towards end_ndrf
+                                if (call2->getCalledValue()->stripPointerCasts() == eNDRF &&
                                     dyn_cast<ConstantInt>(call2->getArgOperand(0))->getZExtValue() == TRACE_NUMBER) {
                                     marked=true;
                                     break;
@@ -710,7 +710,7 @@ namespace {
                     }
 
                     if (!marked) {
-                        //VERBOSE_VERIFY("Detected fNXnm in bb: " << call->getParent()->getName() << "\n");   
+                        VERBOSE_VERIFY("Detected fNXnm in bb: " << call->getParent()->getName() << "\n");   
                         unalignedRMSBarrRel++;
                     }
                 }
