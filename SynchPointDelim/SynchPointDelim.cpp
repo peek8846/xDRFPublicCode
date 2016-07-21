@@ -97,6 +97,9 @@ using namespace std;
 static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for synchpoint graph"),
                                    cl::value_desc("filename"));
 
+static cl::opt<bool> cleanPrePost("ccrpp",cl::desc("Do not continue tracking control flow before/after synch points in critical regions if the synch point does not share a synchronization variable with a after/before synch point"));
+
+
 static cl::opt<AliasResult> SVALIASLEVEL("svaalevel",cl::desc("The required aliasing level to detect that two synchronization variables are the same"),
                                          cl::init(PartialAlias),
                                          cl::values(clEnumVal(NoAlias,"All loads and stores will conflict"),
@@ -119,7 +122,7 @@ namespace {
                                           "pthread_join","_Z19parsec_barrier_waitP16parsec_barrier_t"};
     //These are the functions that are 'to' in a one-way synchronization:
     set<StringRef> onewayToFunctions = {"pthread_cond_wait",
-                                        "sem_post",
+                                        "sem_wait",
                                         "pthread_create",
                                         "pthread_join","_Z19parsec_barrier_waitP16parsec_barrier_t"};
 
@@ -1368,6 +1371,48 @@ namespace {
             }            
         }
 
+        void cleanCriticalRegionPrePost() {
+            for (CriticalRegion* critRegion : criticalRegions) {
+                //First check that we'd be left with atleast one exit after pruning
+                bool atleastOneChecksOut = false;
+                for (SynchronizationPoint* exit : critRegion->exitSynchPoints) {
+                    for (SynchronizationPoint* entry : critRegion->entrySynchPoints) {
+                        if (exit->synchVar == entry->synchVar)
+                            atleastOneChecksOut = true;
+                    }
+                }
+                if (!atleastOneChecksOut)
+                    continue;
+                //Clean exits
+                SmallPtrSet<SynchronizationPoint*,1> toDelete;
+                for (SynchronizationPoint* exit : critRegion->exitSynchPoints) {
+                    bool checksOut = false;
+                    for (SynchronizationPoint* entry : critRegion->entrySynchPoints) {
+                        if (exit->synchVar == entry->synchVar)
+                            checksOut = true;
+                    }
+                    if (!checksOut)
+                        toDelete.insert(exit);
+                }
+                for (SynchronizationPoint* del : toDelete)
+                    critRegion->exitSynchPoints.erase(del);
+                
+                //Clean entries
+                toDelete.clear();
+                for (SynchronizationPoint* entry : critRegion->entrySynchPoints) {
+                    bool checksOut = false;
+                    for (SynchronizationPoint* exit : critRegion->exitSynchPoints) {
+                        if (exit->synchVar == entry->synchVar)
+                            checksOut = true;
+                    }
+                    if (!checksOut)
+                        toDelete.insert(entry);
+                }
+                for (SynchronizationPoint* del : toDelete)
+                    critRegion->entrySynchPoints.erase(del);
+            }
+        }
+
         //Sets up the criticalRegions structure
         void determineCriticalRegions(SmallPtrSet<Function*,4> entryPoints) {
             VERBOSE_PRINT("Determining critical regions...\n");
@@ -1384,6 +1429,9 @@ namespace {
                     }
                 }
             }
+            
+            if (cleanPrePost)
+                cleanCriticalRegionPrePost();
         }
 
         //Meant to be called initially on one of the first synch points encountered in
