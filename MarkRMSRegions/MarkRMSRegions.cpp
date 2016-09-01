@@ -523,8 +523,8 @@ namespace {
                     //Mark it
                     createDummyCall(endXDRF,call,true,TRACE_NUMBER);
                     createDummyCall(beginNDRF,call,true,TRACE_NUMBER);
-                    createDummyCall(endXDRF,call,TRACE_NUMBER);
-                    createDummyCall(beginNDRF,call,TRACE_NUMBER);
+                    createDummyCall(endNDRF,call,TRACE_NUMBER);
+                    createDummyCall(beginXDRF,call,TRACE_NUMBER);
                 }
             }
         }
