@@ -126,6 +126,8 @@ namespace {
             RMSISWait = M.getFunction("RMS_Initial_SemWait"); //will be analyzed
             RMSIBar = M.getFunction("RMS_Initial_Barrier"); //will be analyzed
             RMSFBar = M.getFunction("RMS_Final_Barrier"); //will be analyzed
+            //PARSEC call
+            PARBar = M.getFunction("_Z19parsec_barrier_waitP16parsec_barrier_t");
 
             // assert(bNDRF && eNDRF && bXDRF && eXDRF &&
             //        RMSIAcq && RMSIRel && RMSIBar && RMSFBar &&
@@ -261,7 +263,9 @@ namespace {
             *RMSFBar,
             *RMSISSig,
             *RMSISWait;
-        
+        //Parsec calls
+        Function *PARBar;
+
         int unalignedNENCAcq = 0;
         int unalignedNENCRel = 0;
         int unalignedENCAcq = 0;
@@ -369,6 +373,12 @@ namespace {
                                     correct=!xDRF;
                                     break;
                                 }
+                                //Match towards parsec barrier
+                                if (call2->getCalledValue()->stripPointerCasts() == PARBar) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
                             }
                         }
                     } else {
@@ -400,6 +410,17 @@ namespace {
                                 }
                                 //Match towards initial semaphore wait
                                 if (call2->getCalledValue()->stripPointerCasts() == RMSISWait) {
+                                    aligned = true;
+                                    correct=!xDRF;
+                                    break;
+                                }
+                            }
+                        }
+                        for (BasicBlock::iterator iter = BasicBlock::iterator(prevInst);
+                             iter != prevInst->getParent()->end(); ++iter) {
+                            if (CallInst *call2 = dyn_cast<CallInst>(&*iter)) {
+                                //Match towards parsec barrier
+                                if (call2->getCalledValue()->stripPointerCasts() == PARBar) {
                                     aligned = true;
                                     correct=!xDRF;
                                     break;
@@ -492,7 +513,7 @@ namespace {
 
                     if (!aligned)  {
                         if (TRACE_NUMBER == 0) {
-                            //Check the instructions WITHIN this block after the xDRF call for final_barrier
+                            //Check the instructions WITHIN this block before the xDRF call for final_barrier
                             for (BasicBlock::reverse_iterator iter = BasicBlock::reverse_iterator(prevInst);
                                  iter != prevInst->getParent()->rend(); ++iter) {
                                 //DEBUG_VERIFY("Checking towards " << *iter << "\n");
