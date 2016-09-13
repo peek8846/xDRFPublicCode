@@ -15,12 +15,16 @@ fi
 targetFile=$1
 shift
 
-echo "Checking optimistic"
-opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=1 $@ $targetFile
-echo "Checking conservative"
-opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=2 $@ $targetFile
-echo "Checking manual"
-opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=0 $@ $targetFile
+echo "Checking..."
+
+opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose $@ $targetFile
+
+# echo "Checking optimistic"
+# opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=1 $@ $targetFile
+#echo "Checking conservative"
+#opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=2 $@ $targetFile
+ #echo "Checking manual"
+ #opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=0 $@ $targetFile
 
 
 #2>&1 >/dev/null \
