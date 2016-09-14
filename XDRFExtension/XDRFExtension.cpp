@@ -490,24 +490,59 @@ namespace {
         }
         
         bool MAYCONFLICT(Instruction* X, Instruction* Y) {
-            if (!isa<StoreInst>(X) && !isa<CallInst>(X)) {
-                bool XcanBeWritingFun=false;
-                bool YcanBeWritingFun=false;
+            //if (!isa<StoreInst>(X) && !isa<CallInst>(X)) {
+            //True if X is a fun that could write or a store
+            bool XcanBeWritingFun=false;
+            //True if Y is a fun that could write or a store
+            bool YcanBeWritingFun=false;
+
+            //True if X is not a store or a load and only calls functions that do not access memory
+            bool XdoesNotAccessMemory=false;
+            //True if Y is not a store and only calls functions that do not access memory
+            bool YdoesNotAccessMemory=false;
+            
+            if (!isa<StoreInst>(X)) {
+                if (!isa<LoadInst>(X))
+                    XdoesNotAccessMemory=true;
                 for (Function *fun : getCalledFuns(X)) {
+                    if (!fun->doesNotAccessMemory()) {
+                        XdoesNotAccessMemory=false;
+                    }
                     if (!fun->onlyReadsMemory()) {
                         XcanBeWritingFun=true;
+                        XdoesNotAccessMemory=false;
                         break;
                     }
                 }
+                //If either instruction cannot access memory, there cannot be a conflict
+                if (XdoesNotAccessMemory)
+                    return false;
+            } else
+                XcanBeWritingFun=true;
+            if (!isa<StoreInst>(Y)) {
+                if (!isa<LoadInst>(Y))
+                    YdoesNotAccessMemory=true;
                 for (Function *fun : getCalledFuns(Y)) {
+                    if (!fun->doesNotAccessMemory()) {
+                        YdoesNotAccessMemory=false;
+                    }
                     if (!fun->onlyReadsMemory()) {
                         YcanBeWritingFun=true;
+                        YdoesNotAccessMemory=false;
                         break;
                     }
                 }
-                if (!XcanBeWritingFun && !YcanBeWritingFun)
+                //If either instruction cannot access memory, there cannot be a conflict
+                if (YdoesNotAccessMemory)
                     return false;
-            }
+                
+            } else
+                YcanBeWritingFun=true;
+
+            //Neither one is a store or writing fun
+            if (!XcanBeWritingFun && !YcanBeWritingFun)
+                return false;
+            
             return aacombined->MayConflict(X,Y);
         }
         
