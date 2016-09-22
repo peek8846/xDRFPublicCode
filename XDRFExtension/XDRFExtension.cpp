@@ -173,6 +173,32 @@ struct xDRFRegion {
     set<pair<pair<nDRFRegion*,Instruction*>,pair<nDRFRegion*,Instruction*> > > conflictsTowardsNDRF;
     bool startHere=false;
 
+    //Returns true if all the instructions in insts are in contained instructions or
+    //in the contained instructions of any related XDRF
+    bool associatedWithInstructions(SmallPtrSet<Instruction*,2> insts) {
+        if (containsInstructions(insts))
+            return true;
+        for (xDRFRegion* region : relatedXDRFs)
+            if (region->containsInstructions(insts))
+                return true;
+        return false;
+    }
+
+    //Convenience call
+    bool associatedWithInstructions(Instruction * inst) {
+        SmallPtrSet<Instruction*,2> insts;
+        insts.insert(inst);
+        return associatedWithInstructions(insts);
+    }
+
+    //Convenience call
+    bool associatedWithInstructions(Instruction * inst, Instruction * inst2) {
+        SmallPtrSet<Instruction*,2> insts;
+        insts.insert(inst);
+        insts.insert(inst2);
+        return associatedWithInstructions(insts);
+    }
+    
     //Returns true if all the instructions in insts are in containedinstructions
     bool containsInstructions(SmallPtrSet<Instruction*,2> insts) {
         for (Instruction * inst : insts) {
@@ -846,6 +872,10 @@ namespace {
                                 break;
                             if (region2->enclaveNDRFs.count(ndrf2) != 0) {
                                 skip=true;
+                                for (xDRFRegion * region3 : region2->relatedXDRFs)
+                                    region->relatedXDRFs.insert(region3);
+                                for (xDRFRegion * region3 : region->relatedXDRFs)
+                                    region2->relatedXDRFs.insert(region3);
                                 region->relatedXDRFs.insert(region2);
                                 region2->relatedXDRFs.insert(region);
                             }
