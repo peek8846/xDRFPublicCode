@@ -141,12 +141,12 @@ namespace {
          {"pthread_cond_wait",-1}};
 
     //Functions that should never be considered for tracking
+    //Don't use this too much
     set<StringRef> noAnalyzeFunctions = {"begin_NDRF","end_NDRF","begin_XDRF","end_XDRF"};
     
     //These are the function to treat as if they spawn new
     //threads
     set<StringRef> threadFunctions = {"pthread_create"};
-
     
     struct SynchPointDelim : public ModulePass {
         static char ID;
@@ -239,7 +239,7 @@ namespace {
             //Determine what synchronization variables we have
             determineSynchronizationVariables();
 
-            //Clean up instructions outside parallel regions
+            //Color the synch points reachable from any thread entry point
             for (Function *target : entrypoints) {
                 if (target!=M.getFunction("main"))
                     for (State funState : delimitFunctionDynamic[target].leadingReverseStates) {
@@ -252,14 +252,21 @@ namespace {
             //     if (synchPoint)
             //         VERBOSE_PRINT(synchPoint->ID << "\n");
             // }
-            
+
+            //Color the synch points reachable from any thread creation (mostly colors things in main)
             for (SynchronizationPoint *synchPoint : synchronizationPoints) {
                 SmallPtrSet<Function*,1> calledFuns = getCalledFuns(synchPoint->val);
                 if (anyFunctionNameInSet(calledFuns,startThreadContextFunctions))
                     colorSynchPoints(synchPoint);
             }
-
+            
+            //Clean up the sets around non-colored synch points
             cleanSynchPoints();
+
+            //Clean up the sets specifically leading to the starts in main
+            for (State funState : delimitFunctionDynamic[main].leadingReverseStates) {
+                funState.lastSynch->precedingInsts[NULL].clear();
+            }
             
             //Determine the critical regions we have
             determineCriticalRegions(entrypoints);
@@ -1777,7 +1784,7 @@ namespace {
         //or reachable from a function first called by spawned threads
         SmallPtrSet<SynchronizationPoint*,32> coloredSynchs;
         void colorSynchPoints(SynchronizationPoint *start) {
-            //Color the starting node
+            //Color starting node only if we are in a spawned thread
             if (coloredSynchs.insert(start).second == true) {
                 //If we newly colored this node, recurse into successors
                 if (start != NULL)
@@ -1790,7 +1797,11 @@ namespace {
         void cleanSynchPoints() {
             for (SynchronizationPoint *synchPoint : synchronizationPoints) {
                 for (SynchronizationPoint *pred : synchPoint->preceding) {
-                    if (coloredSynchs.count(pred) == 0 || pred == NULL) {
+                    //Previously, this would also remove instructions towards context begin
+                    //but as this was only usefull for removing instructions done before the first
+                    //synch point in the main thread, instructions towards that can be manually removed
+                    //from mains leadingReverseStates instead
+                    if (coloredSynchs.count(pred) == 0) {
                         synchPoint->precedingInsts[pred].clear();
                         // if (pred)
                         //     VERBOSE_PRINT("Cleaned instruction from synchpoint " << synchPoint->ID << " to synchpoint " << pred -> ID << "\n");
@@ -1808,6 +1819,7 @@ namespace {
                     }
                 }
             }
+            //Remove 
         }
     };    
 }
