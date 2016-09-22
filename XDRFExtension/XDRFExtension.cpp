@@ -173,6 +173,15 @@ struct xDRFRegion {
     set<pair<pair<nDRFRegion*,Instruction*>,pair<nDRFRegion*,Instruction*> > > conflictsTowardsNDRF;
     bool startHere=false;
 
+    //Returns all instructions contained in this xDRF or any related xDRF
+    SmallPtrSet<Instruction*,128> getAssociatedInstructions() {
+        SmallPtrSet<Instruction*,128> toReturn;
+        toReturn.insert(containedInstructions.begin(),containedInstructions.end());
+        for (xDRFRegion* region : relatedXDRFs)
+            toReturn.insert(region->containedInstructions.begin(),region->containedInstructions.end());    
+        return toReturn;
+    }
+    
     //Returns true if all the instructions in insts are in contained instructions or
     //in the contained instructions of any related XDRF
     bool associatedWithInstructions(SmallPtrSet<Instruction*,2> insts) {
