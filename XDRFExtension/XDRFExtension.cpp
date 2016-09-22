@@ -98,7 +98,7 @@ static cl::opt<bool> skipConflictStore("nostore",cl::desc("Do not store data acc
 
 static cl::opt<bool> pruneSurroundingSets("ano",cl::desc("Assume that any instruction inside an nDRF region cannot conflict with other instructions when also encountered in an xDRF region"));
 
-static cl::opt<bool> noCycleDRFAliasing("adcs",cl::desc("Assume that instructions in DRF regions within cycles in the synchronization point graph cannot conflict with instructions within the same cycle"));
+//static cl::opt<bool> noCycleDRFAliasing("adcs",cl::desc("Assume that instructions in DRF regions within cycles in the synchronization point graph cannot conflict with instructions within the same cycle"));
 
 static cl::opt<AliasResult> ALIASLEVEL("aalevel",cl::desc("The required aliasing level to detect a conflict"),
                                        cl::init(MustAlias),
@@ -123,7 +123,10 @@ struct nDRFRegion {
     map<nDRFRegion*,SmallPtrSet<Instruction*,16> > precedingInstructions;
     map<nDRFRegion*,SmallPtrSet<Instruction*,16> > followingInstructions;
     SmallPtrSet<nDRFRegion*,2> synchsWith;
+
+    //Format: <PrecedingInst,FollowingInst>
     set<pair<Instruction*,Instruction*> > conflictsBetweenDRF;
+    //Format: <Preceding/FollowingInst,<RegionContainingConflictingInst,ConflictingInst> >
     set<pair<Instruction*,pair<nDRFRegion*,Instruction*> > > conflictsTowardsDRF;
     bool receivesSignal=false, sendsSignal=false;
     bool enclave=false;
@@ -157,9 +160,16 @@ struct xDRFRegion {
     SmallPtrSet<nDRFRegion*,2> enclaveNDRFs;
     SmallPtrSet<nDRFRegion*,2> precedingNDRFs;
     SmallPtrSet<nDRFRegion*,2> followingNDRFs;
+
+    //contains all XDRFs that have enclave nDRFs that share an synch variable with an enclave nDRF in this region
+    SmallPtrSet<xDRFRegion*,2> relatedXDRFs;
+    
     //Conflict between this xDRF region and another that prevents them from being merged
     //Also has the nDRF region separating them
+
+    //Format: <InstInThisRegion,SeparatingNDRF,InstInOtherRegion>
     set<tuple<Instruction*,nDRFRegion*,Instruction*> > conflictsTowardsXDRF;
+    //Format: <<nDRFRegionSeparating,ConflictingInst>,<nDRFRegionConflicting,ConflictingInst>>
     set<pair<pair<nDRFRegion*,Instruction*>,pair<nDRFRegion*,Instruction*> > > conflictsTowardsNDRF;
     bool startHere=false;
 
@@ -230,6 +240,7 @@ namespace {
                     xDRFRegions.insert(startRegion);
                     consolidateXDRFRegions(region,startRegion);
                 }
+            setupRelatedXDRFs();
             printInfo();
             return false;
         }
@@ -714,6 +725,9 @@ namespace {
             for (xDRFRegion * region : xDRFRegions) {
                 VERBOSE_PRINT("Region " << region->ID << ":\n");
                 VERBOSE_PRINT("Contains " << region->containedInstructions.size() << " instructions\n");
+                DEBUG_PRINT("Contains instructions:\n");
+                for (Instruction * inst : region->containedInstructions)
+                    DEBUG_PRINT(*inst << "\n");
                 VERBOSE_PRINT("Preceded by:\n");
                 for (nDRFRegion * pred : region->precedingNDRFs) {
                     VERBOSE_PRINT("nDRF " << pred->ID << "\n");
@@ -721,6 +735,10 @@ namespace {
                 VERBOSE_PRINT("Followed by:\n");
                 for (nDRFRegion * follow : region->precedingNDRFs) {
                     VERBOSE_PRINT("nDRF " << follow->ID << "\n");
+                }
+                VERBOSE_PRINT("Related with:\n");
+                for (xDRFRegion * related : region->relatedXDRFs) {
+                    VERBOSE_PRINT("xDRF " << related->ID << "\n");
                 }
             }
         }
@@ -739,10 +757,10 @@ namespace {
                                                    predinsts.end());
             for (auto region : xDRFRegions) {
                 DEBUG_PRINT("Region contains:\n");
-                DEBUG_PRINT("Following:");
+                DEBUG_PRINT("Following:\n");
                 for (auto reg : region->followingNDRFs)
                     DEBUG_PRINT(reg->ID << "\n");
-                DEBUG_PRINT("Enclave:");
+                DEBUG_PRINT("Enclave:\n");
                 for (auto reg : region->enclaveNDRFs)
                     DEBUG_PRINT(reg->ID << "\n");
                 if (region->followingNDRFs.count(startHere) != 0 || region->enclaveNDRFs.count(startHere) != 0) {
@@ -809,6 +827,34 @@ namespace {
 
         }
 
+        //Setup which xDRFFs synchronize with each other (non-ordering)
+        void setupRelatedXDRFs() {
+            for (xDRFRegion* region : xDRFRegions) {
+                for (xDRFRegion* region2 : xDRFRegions) {
+                    //Skip if already handled
+                    if (region->relatedXDRFs.count(region2) != 0)
+                        continue;
+                    if (region == region2)
+                        continue;
+                    //shortcut out
+                    bool skip=false;
+                    for (nDRFRegion* ndrf : region->enclaveNDRFs) {
+                        if (skip)
+                            break;
+                        for (nDRFRegion* ndrf2 : ndrf->synchsWith) {
+                            if (skip)
+                                break;
+                            if (region2->enclaveNDRFs.count(ndrf2) != 0) {
+                                skip=true;
+                                region->relatedXDRFs.insert(region2);
+                                region2->relatedXDRFs.insert(region);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         //Some convenience functions to make interfacing easier:
 
         //Obtain the XDRF region of an instruction, or NULL if it is in an nDRF region
