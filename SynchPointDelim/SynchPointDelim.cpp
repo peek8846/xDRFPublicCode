@@ -142,7 +142,18 @@ namespace {
 
     //Functions that should never be considered for tracking
     //Don't use this too much
-    set<StringRef> noAnalyzeFunctions = {"begin_NDRF","end_NDRF","begin_XDRF","end_XDRF"};
+    set<StringRef> noAnalyzeFunctions = {
+        //INTERNALLY USED FUNCTIONS
+        "begin_NDRF","end_NDRF","begin_XDRF","end_XDRF",
+        //RMS FUNCTIONS
+        "RMS_Initial_Acq","RMS_Final_Acq","RMS_Initial_Release","RMS_Final_Release",
+        "RMS_Initial_Barrier","RMS_Final_Barrier",
+        "RMS_Initial_SemWait","RMS_Final_SemWait",
+        "RMS_Initial_SemSignal","RMS_Final_SemSignal",
+        "RMS_Initial_CondWait","RMS_Final_CondWait",
+        "RMS_Initial_CondSignal","RMS_Final_CondSignal",
+        "RMS_Initial_CondBCast","RMS_Final_CondBCast"        
+    };
     
     //These are the function to treat as if they spawn new
     //threads
