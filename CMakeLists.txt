@@ -13,5 +13,6 @@ set(CMAKE_BUILD_TYPE Debug)
 add_subdirectory(XDRFExtension)
 add_subdirectory(MarkXDRFRegions)
 add_subdirectory(MarkRMSRegions)
+add_subdirectory(PatchRMSFunctions)
 add_subdirectory(VerifyXDRF)
 
