@@ -118,7 +118,10 @@ namespace {
             }
 
             toModify->setOnlyReadsMemory();
-            
+            toModify->addFnAttr(Attribute::NoInline);
+            toModify->addFnAttr(Attribute::NoUnwind);
+            toModify->addFnAttr(Attribute::UWTable);
+            toModify->addFnAttr(Attribute::OptimizeNone);
         }
     };
 }
