@@ -259,7 +259,7 @@ namespace {
             setupNDRFRegions(syncdelimited);
             printnDRFRegionGraph(M);
             //Pass &aa = getAnalysis<AAResultsWrapperPass>();
-            aacombined = new AliasCombiner(&M,true,this,ALIASLEVEL);
+            aacombined = new AliasCombiner(&M,!skipUseChainAliasing,this,ALIASLEVEL);
             //aacombined->addAliasResult(&aa);
             VERBOSE_PRINT("Determining enclaveness of nDRF regions\n");
             for (nDRFRegion * region : nDRFRegions)

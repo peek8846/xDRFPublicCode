@@ -99,6 +99,7 @@ static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for sy
 
 static cl::opt<bool> cleanPrePost("ccrpp",cl::desc("Do not continue tracking control flow before/after synch points in critical regions if the synch point does not share a synchronization variable with a after/before synch point"));
 
+static cl::opt<bool> skipUseChainAliasing("nousechain",cl::desc("Do not use the customized \"usechainaliasing\" aliasing algorithm"));
 
 static cl::opt<AliasResult> SVALIASLEVEL("svaalevel",cl::desc("The required aliasing level to detect that two synchronization variables are the same"),
                                          cl::init(PartialAlias),
@@ -207,7 +208,7 @@ namespace {
             SmallPtrSet<Function*,4> entrypoints;
 
             wM=&M;
-            aacombined = new AliasCombiner(&M,true,this,SVALIASLEVEL);
+            aacombined = new AliasCombiner(&M,!skipUseChainAliasing,this,SVALIASLEVEL);
             //aacombined->addAliasResult(&aa);
             
             //Find what functions use synchronizations, this can optimize searching later
