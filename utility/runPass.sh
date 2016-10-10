@@ -64,7 +64,16 @@ opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
       $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -trace 6 $@\
       .internal_temp2~ -o .internal_temp1~
 
-opt -S \
-    -load $MarkRMSRegionsSo -mark-rms .internal_temp1~ $outputFile
+opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
+     $AAs -SPDelim -XDRFextend -aalevel MustAlias -ndrfconflict -MarkXDRF -trace 3 $@\
+     .internal_temp3~ -o .internal_temp4~
 
-rm -f .internal_temp1~ .internal_temp2~
+opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
+     $AAs -SPDelim -XDRFextend -aalevel MayAlias -ndrfconflict -MarkXDRF -trace 4 $@\
+     .internal_temp4~ -o .internal_temp5~
+
+opt -S \
+
+    -load $MarkRMSRegionsSo -mark-rms .internal_temp5~ $outputFile
+
+rm -f .internal_temp~ .internal_temp2~ .internal_temp3~ .internal_temp4~ .internal_temp5~

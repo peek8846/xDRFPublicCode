@@ -118,6 +118,9 @@ static cl::opt<AliasResult> ALIASLEVEL("aalevel",cl::desc("The required aliasing
                                                   clEnumVal(MustAlias,"Only loads and stores that are proven to point to the same location will conflict"),
                                                   clEnumValEnd));
 
+// CRA: Conflict resolution addition
+static cl::opt<bool> conflictNDRF("ndrfconflict",cl::desc("Resolve conflicts by putting affected instructions in enclave nDRF regions"));
+
 struct nDRFRegion {
     nDRFRegion() {
         static int rID = 0;
@@ -141,6 +144,15 @@ struct nDRFRegion {
     bool receivesSignal=false, sendsSignal=false;
     bool enclave=false;
     bool startHere=false;
+
+    // CRA: Conflict resolution addition
+    // In pre-existing nDRFs, sets are populated with records about what conflicts would have made the region non-enclave.
+    // In conflict resolving nDRFs (resolved==true), sets are populated with records describing conflits it fixes.
+    //Format: <PrecedingInst,FollowingInst>
+    set<pair<Instruction*,Instruction*> > resolvedBetweenDRF;
+    //Format: <Preceding/FollowingInst,<RegionContainingConflictingInst,ConflictingInst> >
+    set<pair<Instruction*,pair<nDRFRegion*,Instruction*> > > resolvedTowardsDRF;
+    bool resolved = false; // True iff the region was created to resolve a conflict
 
     SmallPtrSet<Instruction*,128> getPrecedingInsts() {
         SmallPtrSet<Instruction*,128> toReturn;
@@ -287,6 +299,10 @@ namespace {
                     xDRFRegions.insert(startRegion);
                     consolidateXDRFRegions(region,startRegion);
                 }
+            // CRA: The next for loop
+            for (pair<Instruction*, nDRFRegion*> region : resolvedNDRFs) {
+                nDRFRegions.insert(region.second);
+            }
             setupRelatedXDRFs();
             printInfo();
             return false;
@@ -296,6 +312,31 @@ namespace {
         SmallPtrSet<xDRFRegion*,6> xDRFRegions;
 
         SmallPtrSet<Instruction*,128> instructionsInNDRF;
+
+        // TODO: Move to private?
+        // CRA: Conflict resolution addition
+        // Format: <Conflicting instruction, resolving nDRF>
+        map<Instruction*, nDRFRegion*> resolvedNDRFs;
+
+        // TODO: Move to private?
+        // CRA: nDRFRegion* getResolvedNDRF(Instruction *conflict)
+        // Returns an nDRF region resolving the conflict instruction.
+        // If an nDRF region already exists for the conflict in resolvedNDRFs
+        // that region will be returned, otherwise a new region, containing
+        // the conflict instruction with resolved and enclave set to true,
+        // will be inserted with the instruction in resolvedNDRFs and returned.
+        nDRFRegion *getResolvedNDRF(Instruction *conflict) {
+            if (resolvedNDRFs.count(conflict) == 0) {
+                nDRFRegion *newNDRF = new nDRFRegion();
+                newNDRF->resolved = true;
+                newNDRF->enclave = true;
+                newNDRF->beginsAt.insert(conflict);
+                newNDRF->endsAt.insert(conflict);
+                newNDRF->containedInstructions.insert(conflict);
+                resolvedNDRFs[conflict] = newNDRF;
+            }
+            return resolvedNDRFs[conflict];
+        }
 
         void pruneSurroundingsFromNDRFs() {
             VERBOSE_PRINT("Enabled assumed ndrf no alias assumption\n");
@@ -760,10 +801,24 @@ namespace {
                 for (Instruction * instAfter : toCompareAgainst) {
                     //Comparing instructions to themselves, in case of loops, is perfectly fine
                     if (MAYCONFLICT_DRF_DRF(instPre,instAfter)) {
-                        if (!skipConflictStore)
-                            regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
-                        DEBUG_PRINT("Found conflict between preceding and following DRF regions\n");
-                        conflict=true;
+                        if (!conflictNDRF) {
+                            if (!skipConflictStore)
+                                regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
+                            DEBUG_PRINT("Found conflict between preceding and following DRF regions\n");
+                            conflict=true;
+                        } else {
+                            // CRA
+                            nDRFRegion *resolvedNDRFPre = getResolvedNDRF(instPre);
+                            nDRFRegion *resolvedNDRFAfter = getResolvedNDRF(instAfter);
+                            if (!skipConflictStore) {
+                                pair<Instruction*,Instruction*> conflpair = make_pair(instPre,instAfter);
+                                resolvedNDRFPre->resolvedBetweenDRF.insert(conflpair);
+                                resolvedNDRFAfter->resolvedBetweenDRF.insert(conflpair);
+                                regionToExtend->resolvedBetweenDRF.insert(conflpair);
+                            }
+                            DEBUG_PRINT("Found and resolved conflict between preceding and following DRF regions\n");
+                            //conflict=false; // Suppress setting conflict
+                        }
                     }
                 }
                 //Check our preceding instructions towards the instructions inside the following nDRFs
@@ -771,10 +826,22 @@ namespace {
                     if (region) {
                         for (Instruction * instIn : region->containedInstructions) {
                             if (MAYCONFLICT_DRF_NDRF(instPre,instIn)) {
-                                if (!skipConflictStore)
-                                    regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
-                                DEBUG_PRINT("Found conflict between preceding DRF and following nDRF regions\n");
-                                conflict=true;
+                                if (!conflictNDRF) {
+                                    if (!skipConflictStore)
+                                        regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
+                                    DEBUG_PRINT("Found conflict between preceding DRF and following nDRF regions\n");
+                                    conflict=true;
+                                } else {
+                                    // CRA
+                                    nDRFRegion *resolvedNDRFPre = getResolvedNDRF(instPre);
+                                    if (!skipConflictStore) {
+                                        pair<Instruction*,pair<nDRFRegion*,Instruction*> > conflpair = make_pair(instPre,make_pair(region,instIn));
+                                        resolvedNDRFPre->resolvedTowardsDRF.insert(conflpair);
+                                        regionToExtend->resolvedTowardsDRF.insert(conflpair);
+                                    }
+                                    DEBUG_PRINT("Found and resolved conflict between preceding DRF and following nDRF regions\n");
+                                    //conflict=false; // Suppress setting conflict
+                                }
                             }
                         }
                     }
@@ -784,18 +851,42 @@ namespace {
             for (Instruction * instIn : regionToExtend->containedInstructions) {
                 for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {   
                     if (MAYCONFLICT_DRF_NDRF(instPre,instIn)) {
-                        if (!skipConflictStore)
-                            regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(regionToExtend,instIn)));
-                        DEBUG_PRINT("Found conflict between nDRF region and preceding DRF regions\n");
-                        conflict=true;
+                        if (!conflictNDRF) {
+                            if (!skipConflictStore)
+                                regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(regionToExtend,instIn)));
+                            DEBUG_PRINT("Found conflict between nDRF region and preceding DRF regions\n");
+                            conflict=true;
+                        } else {
+                            // CRA
+                            nDRFRegion *resolvedNDRFPre = getResolvedNDRF(instPre);
+                            if (!skipConflictStore) {
+                                pair<Instruction*,pair<nDRFRegion*,Instruction*> > conflpair = make_pair(instPre,make_pair(regionToExtend,instIn));
+                                resolvedNDRFPre->resolvedTowardsDRF.insert(conflpair);
+                                regionToExtend->resolvedTowardsDRF.insert(conflpair);
+                            }
+                            DEBUG_PRINT("Found and resolved conflict between nDRF region and preceding DRF regions\n");
+                            //conflict=false; // Suppress setting conflict
+                        }
                     }
                 }
                 for (Instruction * instAfter : toCompareAgainst) {   
                     if (MAYCONFLICT_DRF_NDRF(instIn,instAfter)) {
-                        if (!skipConflictStore)
-                            regionToExtend->conflictsTowardsDRF.insert(make_pair(instAfter,make_pair(regionToExtend,instIn)));
-                        DEBUG_PRINT("Found conflict between nDRF region and following DRF regions\n");
-                        conflict=true;
+                        if (!conflictNDRF) {
+                            if (!skipConflictStore)
+                                regionToExtend->conflictsTowardsDRF.insert(make_pair(instAfter,make_pair(regionToExtend,instIn)));
+                            DEBUG_PRINT("Found conflict between nDRF region and following DRF regions\n");
+                            conflict=true;
+                        } else {
+                            // CRA
+                            nDRFRegion *resolvedNDRFAfter = getResolvedNDRF(instAfter);
+                            if (!skipConflictStore) {
+                                pair<Instruction*,pair<nDRFRegion*,Instruction*> > conflpair = make_pair(instAfter,make_pair(regionToExtend,instIn));
+                                resolvedNDRFAfter->resolvedTowardsDRF.insert(conflpair);
+                                regionToExtend->resolvedTowardsDRF.insert(conflpair);
+                            }
+                            DEBUG_PRINT("Found and resolved conflict between nDRF region and following DRF regions\n");
+                            //conflict=false; // Suppress setting conflict
+                        }
                     }
                 }
             }
