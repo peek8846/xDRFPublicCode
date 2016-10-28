@@ -1,5 +1,5 @@
 #ifndef _SYNCHPOINTDELIM_
-7#define _SYNCHPOINTDELIM_
+#define _SYNCHPOINTDELIM_
 //===- Identify Synchronization Points, DRF Paths and Critical REgions ----===//
 // Analysis Compiler Pass to Identify the synchronization points, the paths between them
 // and the critical regions
