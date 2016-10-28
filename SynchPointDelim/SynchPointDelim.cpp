@@ -1,5 +1,5 @@
 #ifndef _SYNCHPOINTDELIM_
-#define _SYNCHPOINTDELIM_
+7#define _SYNCHPOINTDELIM_
 //===- Identify Synchronization Points, DRF Paths and Critical REgions ----===//
 // Analysis Compiler Pass to Identify the synchronization points, the paths between them
 // and the critical regions
@@ -102,7 +102,7 @@ static cl::opt<bool> cleanPrePost("ccrpp",cl::desc("Do not continue tracking con
 static cl::opt<bool> skipUseChainAliasing("nousechain",cl::desc("Do not use the customized \"usechainaliasing\" aliasing algorithm"));
 
 static cl::opt<AliasResult> SVALIASLEVEL("svaalevel",cl::desc("The required aliasing level to detect that two synchronization variables are the same"),
-                                         cl::init(PartialAlias),
+                                         cl::init(MayAlias),
                                          cl::values(clEnumVal(NoAlias,"All loads and stores will conflict"),
                                                     clEnumVal(MayAlias,"All loads and stores not proven to noconflict will conflict"),
                                                     clEnumVal(PartialAlias,"Only loads and stores that might overlap will conflict"),
@@ -154,7 +154,7 @@ namespace {
         "RMS_Initial_CondWait","RMS_Final_CondWait",
         "RMS_Initial_CondSignal","RMS_Final_CondSignal",
         "RMS_Initial_CondBCast","RMS_Final_CondBCast"        
-    };
+     };
     
     //These are the function to treat as if they spawn new
     //threads
