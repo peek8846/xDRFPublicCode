@@ -8,14 +8,14 @@
     tar xvf llvm-3.8.0.src.tar.xz
     tar xvf cfe-3.8.0.src.tar.xz
     tar xvf compiler-rt-3.8.0.src.tar.xz
-    mv llvm-3.8.0.src <llvm-prefix>/llvm-3.8.0-src
-    mv cfe-3.8.0.src <llvm-prefix>/llvm-3.8.0-src/tools/clang
-    mv compiler-rt-3.8.0.src <llvm-prefix>/llvm-3.8.0-src/projects/compiler-rt
+    mv llvm-3.8.0.src <llvm-prefix>/llvm-3.8.0.src
+    mv cfe-3.8.0.src <llvm-prefix>/llvm-3.8.0.src/tools/clang
+    mv compiler-rt-3.8.0.src <llvm-prefix>/llvm-3.8.0.src/projects/compiler-rt
 
   1c. Build and install
     mkdir <llvm-prefix>/llvm-3.8.0-build
     cd <llvm-prefix>/llvm-3.8.0-build
-    cmake -DCMAKE_INSTALL_PREFIX=<llvm-prefix>/llvm-3.8.0-install \
+    cmake -DCMAKE_INSTALL_PREFIX=<llvm-prefix>/llvm-3.8.0.install \
           -DLLVM_ENABLE_ASSERTIONS=ON \
           -DCMAKE_BUILD_TYPE=Release \
           -DLLVM_ENABLE_RTTI=ON \
@@ -36,7 +36,7 @@
   2b. Build and install
     mkdir <xDRF-prefix>/xDRF-build
     cd <xDRF-prefix>/xDRF-build
-    cmake -DLLVM_DIR=<llvm-prefix>/llvm-3.8.0-install/share/llvm/cmake ../xDRF-src
+    cmake -DLLVM_DIR=<llvm-prefix>/llvm-3.8.0.install/share/llvm/cmake ../xDRF-src
     cmake --build .
 
   2c. Locate pass binary
