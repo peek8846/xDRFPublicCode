@@ -13,13 +13,13 @@
     mv compiler-rt-3.8.0.src <llvm-prefix>/llvm-3.8.0.src/projects/compiler-rt
 
   1c. Build and install
-    mkdir <llvm-prefix>/llvm-3.8.0-build
-    cd <llvm-prefix>/llvm-3.8.0-build
+    mkdir <llvm-prefix>/llvm-3.8.0.build
+    cd <llvm-prefix>/llvm-3.8.0.build
     cmake -DCMAKE_INSTALL_PREFIX=<llvm-prefix>/llvm-3.8.0.install \
           -DLLVM_ENABLE_ASSERTIONS=ON \
           -DCMAKE_BUILD_TYPE=Release \
           -DLLVM_ENABLE_RTTI=ON \
-          ../llvm-3.8.0-src
+          ../llvm-3.8.0.src
     cmake --build .
     cmake --build . --target install
 
