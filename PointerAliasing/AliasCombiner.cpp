@@ -60,6 +60,7 @@ public:
     //If any alias analysis says they do not alias, this returns false. Otherwise returns true.
     //More specifically, if we can for each argument to the instruction find atleast one proof it does not alias
     //then we say it does not alias
+    //Note, an "alias" in this sense means that the instructions could access the same data when ran by different threads
     bool MayConflict(Instruction *ptr1, Instruction *ptr2) {
         DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
         bool toReturn=false;
@@ -95,23 +96,37 @@ public:
                         }
                         
                         Function * parent = NULL;
-                        if (Instruction * inst = dyn_cast<Instruction>(P1a)) {
-                            parent=inst->getParent()->getParent();
+                        if (Instruction * inst = dyn_cast<Instruction>(comparable.first)) {
+                            parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
                         }
-                        if (Argument * inst = dyn_cast<Argument>(P1a)) {
-                            parent=inst->getParent();
+                        if (Argument * inst = dyn_cast<Argument>(comparable.first)) {
+                            parent=inst->getParent() ? inst->getParent() : parent;
                         }
-                        if (Instruction * inst = dyn_cast<Instruction>(P2a)) {
-                            parent=inst->getParent()->getParent();
+                        if (Instruction * inst = dyn_cast<Instruction>(comparable.second)) {
+                            parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
                         }
-                        if (Argument * inst = dyn_cast<Argument>(P2a)) {
-                            parent=inst->getParent();
+                        if (Argument * inst = dyn_cast<Argument>(comparable.second)) {
+                            parent=inst->getParent() ? inst->getParent() : parent;
                         }
-
-                        if (parent == NULL)
-                            continue;
+                        
                         LIGHT_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
                         LIGHT_PRINT("Which have types: " << typeid(*comparable.first).name() << " and " << typeid(*comparable.second).name() << "\n");
+
+                        //Some shortcutting is desirable here
+                        if (isa<GlobalVariable>(comparable.first) && isa<GlobalVariable>(comparable.second)) {
+                            //Might want to do more advanced stuff later
+                            if (comparable.first == comparable.second) {
+                                DEBUG_PRINT("Determined to alias by virtue of being the same global");
+                                return true;
+                            }
+                        }
+                        
+                        //This is for the weird case where no comparable value is within a function.
+                        if (!parent) {
+                            DEBUG_PRINT("Neither comparable value is within a function\n");
+                            continue;
+                        }
+
                         bool aliased=false;
                         //for (Pass *aa : aliasResults) {
                             //bool aliased=false;
@@ -144,11 +159,11 @@ public:
                             LIGHT_PRINT("Determined that they aliased\n");
                             return true;
                         }
-                        //}
                     }
                 }
             }
         }
+        DEBUG_PRINT("Returned " << (toReturn ? "true\n" : "false\n"));
         return toReturn;
     }
 
@@ -191,22 +206,37 @@ public:
                         }
 
                         Function * parent = NULL;
-                        if (Instruction * inst = dyn_cast<Instruction>(P1a)) {
-                            parent=inst->getParent()->getParent();
+                        if (Instruction * inst = dyn_cast<Instruction>(comparable.first)) {
+                            parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
                         }
-                        if (Argument * inst = dyn_cast<Argument>(P1a)) {
-                            parent=inst->getParent();
+                        if (Argument * inst = dyn_cast<Argument>(comparable.first)) {
+                            parent=inst->getParent() ? inst->getParent() : parent;
                         }
-                        if (Instruction * inst = dyn_cast<Instruction>(P2a)) {
-                            parent=inst->getParent()->getParent();
+                        if (Instruction * inst = dyn_cast<Instruction>(comparable.second)) {
+                            parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
                         }
-                        if (Argument * inst = dyn_cast<Argument>(P2a)) {
-                            parent=inst->getParent();
+                        if (Argument * inst = dyn_cast<Argument>(comparable.second)) {
+                            parent=inst->getParent() ? inst->getParent() : parent;
                         }
-                        if (parent == NULL)
-                            continue;
 
                         LIGHT_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
+                        LIGHT_PRINT("Which have types: " << typeid(*comparable.first).name() << " and " << typeid(*comparable.second).name() << "\n");
+
+                        //Some shortcutting is desirable here
+                        if (isa<GlobalVariable>(comparable.first) && isa<GlobalVariable>(comparable.second)) {
+                            //Might want to do more advanced stuff later
+                            if (comparable.first == comparable.second) {
+                                DEBUG_PRINT("Determined to alias by virtue of being the same global");
+                                return true;
+                            }
+                        }
+                        
+                        //This is for the weird case where no comparable value is within a function.
+                        if (!parent) {
+                            DEBUG_PRINT("Neither comparable value is within a function\n");
+                            continue;
+                        }
+                        
                         bool aliased=false;
                         //for (Pass *aa : aliasResults) {
                         
@@ -411,7 +441,7 @@ private:
         return make_pair((Value*)NULL,(Value*)NULL);
     }
   
-    bool mayConflictSameContext(Value *ptr1, Value* ptr2) {
+    bool mayConflictSameContext(Instruction *ptr1, Value* ptr2) {
         //DEBUG_PRINT("Checking whether " << *ptr1 << " and " << *ptr2 << " might alias in the same context\n");
         // if (useUseChainAliasing) {
         //     DEBUG_PRINT("Testing with usechainaliasing\n");
@@ -427,8 +457,9 @@ private:
         bool toReturn=true;
         //for (Pass *results : aliasResults) {
         bool aliased=false;
-        Function * parent = dyn_cast<Instruction>(ptr1)->getParent()->getParent();
+        Function * parent = dyn_cast<Instruction>(ptr1)->getFunction();
         DEBUG_PRINT("Done calling alias\n");
+        DEBUG_PRINT(*ptr1 << "\n");
         AliasResult res = getAAResultsForFun(parent)->alias(ptr1,ptr2); 
         switch (res) {
         case NoAlias:
@@ -688,8 +719,6 @@ private:
             }
         }
         
-        //These are the recursive cases, they add pointers to nextPointers
-        //and define how to merge offsets
         if (auto load = dyn_cast<LoadInst>(val)) {
             return canBeSharedDynamic[val]=canBeShared(load->getPointerOperand());
         }
