@@ -916,6 +916,13 @@ namespace {
                     VERBOSE_PRINT("  Receives signals\n");
                 if (region->sendsSignal)
                     VERBOSE_PRINT("  Sends signals\n");
+                // CRA: Say if the nDRF is a resolution
+                if (conflictNDRF) {
+                    if (region->resolved)
+                        VERBOSE_PRINT("  Resolves conflict\n");
+                    else
+                        VERBOSE_PRINT("  Does not resolve conflict (standard)\n");
+                }
                 VERBOSE_PRINT("  Begins at:\n");
                 for (Instruction * inst : region->beginsAt) {
                     VERBOSE_PRINT("   " << *inst << "\n");
@@ -950,6 +957,17 @@ namespace {
                 VERBOSE_PRINT("  Conflicts towards DRF regions:\n");
                 for (pair<Instruction*, pair<nDRFRegion*,Instruction*> > conflict : region->conflictsTowardsDRF) {
                     VERBOSE_PRINT("    DRF instruction" << *(conflict.first) << " conflicts with instruction" << *(conflict.second.second) << " in region with ID " << (conflict.second.first)->ID << "\n");
+                }
+                // CRA: List resolved conflicts
+                if (conflictNDRF) {
+                    VERBOSE_PRINT("  Resolved conflicts across region:\n");
+                    for (pair<Instruction*,Instruction*> conflict : region->resolvedBetweenDRF) {
+                        VERBOSE_PRINT("    " << *(conflict.first) << " conflicted with " << *(conflict.second) << "\n");
+                    }
+                    VERBOSE_PRINT("  Resolved conflicts towards DRF regions:\n");
+                    for (pair<Instruction*, pair<nDRFRegion*,Instruction*> > conflict : region->resolvedTowardsDRF) {
+                        VERBOSE_PRINT("    DRF instruction" << *(conflict.first) << " conflicted with instruction" << *(conflict.second.second) << " in region with ID " << (conflict.second.first)->ID << "\n");
+                    }
                 }
 
             }
