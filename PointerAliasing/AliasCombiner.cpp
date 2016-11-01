@@ -80,7 +80,7 @@ public:
                         if (useUseChainAliasing) {
                             DEBUG_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
-                            if (pointerAlias(P1a,P2a) == false) {
+                            if (pointerAlias(P1a,P2a,callingPass) == false) {
                                 DEBUG_PRINT("Determined to not alias by use chain analysis\n");
                                 continue;
                             }
@@ -192,7 +192,7 @@ public:
                         if (useUseChainAliasing) {
                             DEBUG_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
-                            if (pointerAlias(P1a,P2a) == true) {
+                            if (pointerAlias(P1a,P2a,callingPass) == true) {
                                 DEBUG_PRINT("Determined to alias by usechainaliasing\n");
                                 toReturn=true;
                             }

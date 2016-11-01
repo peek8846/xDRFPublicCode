@@ -12,7 +12,7 @@ MarkRMSRegionsSo=$XDRF_BUILD/MarkRMSRegions/libMarkRMSRegions.so
 #     exit 1
 # fi
 
-AAs="-wpa -fspta"
+AAs="-wpa -fspta -scalar-evolution"
 #AAs="-basicaa -globals-aa"
 
 if [[ $# < 1 ]] ; then
@@ -21,7 +21,6 @@ if [[ $# < 1 ]] ; then
 fi
 
 targetFile=$1
-
 
 if [[ $# > 1 ]] ; then
     outputFile="-o $2"
@@ -37,12 +36,12 @@ opt -S \
     $targetFile -o .internal_temp~
 
 opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-     $AAs -SPDelim -XDRFextend -aalevel MustAlias -MarkXDRF -trace 1 $@\
-     .internal_temp~ -o .internal_temp2~
+      $AAs -SPDelim -XDRFextend -aalevel MustAlias -MarkXDRF -trace 1 $@\
+      .internal_temp~ -o .internal_temp2~ #$outputFile #-o .internal_temp2~
 
 opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-     $AAs -SPDelim -XDRFextend -aalevel MayAlias -MarkXDRF -trace 2 $@\
-     .internal_temp2~ -o .internal_temp3~
+      $AAs -SPDelim -XDRFextend -aalevel MayAlias -MarkXDRF -trace 2 $@\
+      .internal_temp2~ -o .internal_temp3~
 
 opt -S \
     -load $MarkRMSRegionsSo -mark-rms .internal_temp3~ $outputFile

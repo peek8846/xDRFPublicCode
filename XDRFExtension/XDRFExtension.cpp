@@ -58,7 +58,7 @@
 // #include "llvm/Analysis/AliasAnalysis.h"
 // #include "llvm/Analysis/TargetLibraryInfo.h"
 // #include "llvm/Analysis/MemoryLocation.h"
-// #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 // #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 
 // #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -248,6 +248,7 @@ namespace {
             AU.addRequired<AssumptionCacheTracker>();
             AU.addRequired<TargetLibraryInfoWrapperPass>();
             AU.addRequired<SynchPointDelim>();
+            AU.addRequired<ScalarEvolutionWrapperPass>();
             AU.setPreservesAll();
         }
       

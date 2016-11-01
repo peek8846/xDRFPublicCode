@@ -7,15 +7,18 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/CallSite.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include <list>
 
 // // #include "llvm/Analysis/ScalarEvolution.h"
 // #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 
 bool AssumeDGEPAliasConstBase = true;
-bool AssumeDGEPNoAlias = true;
+bool AssumeDGEPNoAlias = false;
 
 Module *usechain_wm;
+Pass *callingPass;
 
 //Gets the called function of a callsite irregardless of casts
 Function *getStripCall(CallSite *callsite) {
@@ -37,28 +40,28 @@ bool isCallSite(Instruction* inst) {
 //Is only more powerfull than constant folding in loops, where it will
 //reduce an iterative variable to its base value
 bool isBaseConstantInLoopSCEV(Value *val, ConstantInt **base, Function *containingFun) {
-  // ScalarEvolution *SE = getSE(containingFun);
-  // const SCEV* scev_val = SE->getSCEV(val);
-  // // errs() << "Resolving SCEV for val: " << *val << " - ";
-  // // scev_val->print(errs());
-  // // errs() << "\n";
-  // while (!isa<SCEVConstant>(scev_val)) {
-  //   if (auto scev_rec = dyn_cast<SCEVAddRecExpr>(scev_val)) {
-  //     scev_val = scev_rec->getStart();
-  //     continue;
-  //   }
-  //   // errs() << "Resolution failed, stopped at: ";
-  //   // scev_val->print(errs());
-  //   // errs() << "\n";
-  //   return false;
-  // }
-  // *base = dyn_cast<SCEVConstant>(scev_val)->getValue();
+  ScalarEvolution &SE = callingPass->getAnalysis<ScalarEvolutionWrapperPass>(*containingFun).getSE();
+  const SCEV* scev_val = SE.getSCEV(val);
+  // errs() << "Resolving SCEV for val: " << *val << " - ";
+  // scev_val->print(errs());
+  // errs() << "\n";
+  while (!isa<SCEVConstant>(scev_val)) {
+    if (auto scev_rec = dyn_cast<SCEVAddRecExpr>(scev_val)) {
+      scev_val = scev_rec->getStart();
+      continue;
+    }
+    // errs() << "Resolution failed, stopped at: ";
+    // scev_val->print(errs());
+    // errs() << "\n";
+    return false;
+  }
+  *base = dyn_cast<SCEVConstant>(scev_val)->getValue();
             
-  // // if (scev_val != SE->getSCEV(val)) {
-  // //     errs() << "Resolved non-constant to: " << **base << "\n";
-  // // }
-  // return true;
-  return false;
+  // if (scev_val != SE->getSCEV(val)) {
+  //     errs() << "Resolved non-constant to: " << **base << "\n";
+  // }
+  return true;
+  //return false;
 }
 
 //Returns wether the dynamic gep was resolved
@@ -246,13 +249,15 @@ set<pair<Value*,list<int> > > findBottomLevelValues(Value *val) {
 
 map<pair<Value*,Value*>, bool> pointerAliasDynamic;
 
-bool pointerAlias(Value *pt1, Value *pt2) {
+bool pointerAlias(Value *pt1, Value *pt2, Pass *callingpass) {
   //errs() << "Usechainpointeralias is comparing " << *pt1 << " and " << *pt2 << "\n";
   if (pointerAliasDynamic.count(make_pair(pt1,pt2)) != 0) {
     //errs() << "Was previously resolved to " << (pointerAliasDynamic[make_pair(pt1,pt2)] ? "aliasing" : "not aliasing") << "\n"; 
     return pointerAliasDynamic[make_pair(pt1,pt2)];
   }
 
+  callingPass = callingpass;
+  
   set<pair<Value*,list<int> > > bottomUsesPt1 = findBottomLevelValues(pt1);
   set<pair<Value*,list<int> > > bottomUsesPt2 = findBottomLevelValues(pt2);
 
@@ -300,44 +305,45 @@ bool pointerAlias(Value *pt1, Value *pt2) {
 
 SmallPtrSet<Value*,1024> visitedAliasValues;
 
-//Pointer comparsion
-//Checks wether the pointer arguments to two instructions
-//do not alias
-bool pointerConflict(Instruction *P1, Instruction *P2, Module *M) {
-  usechain_wm = M;
-  SmallPtrSet<Value*,4> P1Pargs;
-  SmallPtrSet<Value*,4> P2Pargs;
-  if (auto P1_load = dyn_cast<LoadInst>(P1))
-    P1Pargs.insert(P1_load->getPointerOperand());
-  if (auto P1_store = dyn_cast<StoreInst>(P1))
-    P1Pargs.insert(P1_store->getPointerOperand());
-  if (auto P1_call = CallSite(P1))
-    for (Use &arg : P1_call.args())
-      if (isa<PointerType>(arg.get()->getType()))
-	P1Pargs.insert(arg.get());
-  if (auto P2_load = dyn_cast<LoadInst>(P2))
-    P2Pargs.insert(P2_load->getPointerOperand());
-  if (auto P2_store = dyn_cast<StoreInst>(P2))
-                P2Pargs.insert(P2_store->getPointerOperand());
-  if (auto P2_call = CallSite(P2))
-    for (Use &arg : P2_call.args())
-      if (isa<PointerType>(arg.get()->getType()))
-	P2Pargs.insert(arg.get());
-  bool toReturn = false;
-  for (Value *P1a : P1Pargs) {
-    if (toReturn)
-      break;
-    if(isa<PointerType>(P1a->getType()))
-      for (Value *P2a : P2Pargs) {
-	if (toReturn)
-	  break;
-	if (isa<PointerType>(P2a->getType()))
-	  if (pointerAlias(P1a,P2a)) {
-	    toReturn = true;
-	  }
-      }
-  }
-  return toReturn;
-}
+// DEPRECATED
+// //Pointer comparsion
+// //Checks wether the pointer arguments to two instructions
+// //do not alias
+// bool pointerConflict(Instruction *P1, Instruction *P2, Module *M) {
+//   usechain_wm = M;
+//   SmallPtrSet<Value*,4> P1Pargs;
+//   SmallPtrSet<Value*,4> P2Pargs;
+//   if (auto P1_load = dyn_cast<LoadInst>(P1))
+//     P1Pargs.insert(P1_load->getPointerOperand());
+//   if (auto P1_store = dyn_cast<StoreInst>(P1))
+//     P1Pargs.insert(P1_store->getPointerOperand());
+//   if (auto P1_call = CallSite(P1))
+//     for (Use &arg : P1_call.args())
+//       if (isa<PointerType>(arg.get()->getType()))
+// 	P1Pargs.insert(arg.get());
+//   if (auto P2_load = dyn_cast<LoadInst>(P2))
+//     P2Pargs.insert(P2_load->getPointerOperand());
+//   if (auto P2_store = dyn_cast<StoreInst>(P2))
+//                 P2Pargs.insert(P2_store->getPointerOperand());
+//   if (auto P2_call = CallSite(P2))
+//     for (Use &arg : P2_call.args())
+//       if (isa<PointerType>(arg.get()->getType()))
+// 	P2Pargs.insert(arg.get());
+//   bool toReturn = false;
+//   for (Value *P1a : P1Pargs) {
+//     if (toReturn)
+//       break;
+//     if(isa<PointerType>(P1a->getType()))
+//       for (Value *P2a : P2Pargs) {
+// 	if (toReturn)
+// 	  break;
+// 	if (isa<PointerType>(P2a->getType()))
+// 	  if (pointerAlias(P1a,P2a)) {
+// 	    toReturn = true;
+// 	  }
+//       }
+//   }
+//   return toReturn;
+// }
 
 #endif
