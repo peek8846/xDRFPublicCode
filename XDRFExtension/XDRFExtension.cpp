@@ -79,11 +79,18 @@
 #define PRINT_DEBUG PRINTSTREAM << "XDRFExtension (debug): "
 
 //Verbose prints things like progress
-#define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("verbose",PRINT << X)
+#define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("LIBRARYNAME-verbose",PRINT << X)
 //Light prints things like more detailed progress
-#define LIGHT_PRINT(X) DEBUG_WITH_TYPE("light",PRINT << X)
+#define LIGHT_PRINT(X) DEBUG_WITH_TYPE("LIBRARYNAME-light",PRINT << X)
 //Debug should more accurately print exactly what is happening
-#define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
+#define DEBUG_PRINT(X) DEBUG_WITH_TYPE("LIBRARYNAME-debug",PRINT_DEBUG << X)
+
+// //Verbose prints things like progress
+// #define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("verbose",PRINT << X)
+// //Light prints things like more detailed progress
+// #define LIGHT_PRINT(X) DEBUG_WITH_TYPE("light",PRINT << X)
+// //Debug should more accurately print exactly what is happening
+// #define DEBUG_PRINT(X) DEBUG_WITH_TYPE("debug",PRINT_DEBUG << X)
 
 //Shorthand for checking whether two accesses conflict
 //#define MAYCONFLICT(X,Y) ((isa<StoreInst>(X) || isa<StoreInst>(Y)) && aacombined->MayConflict(X,Y))

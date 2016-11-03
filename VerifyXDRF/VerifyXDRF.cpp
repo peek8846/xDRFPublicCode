@@ -1,4 +1,4 @@
-//===- Identify xDRF regions in non-structured parallel applications ------===//
+//===- Verifies xDRF markings towards RMS markings  ------===//
 //
 //
 //===----------------------------------------------------------------------===//
@@ -66,10 +66,16 @@
 #define PRINT_DEBUG PRINTSTREAM << "VerifyXDRF: "
 #define PRINT_RESULTS PRINTSTREAM << indent
 
-#define DEBUG_VERIFY(X) DEBUG_WITH_TYPE("verify-xdrf", PRINT_DEBUG << X)
-#define PRINT_VERIFY(X) DEBUG_WITH_TYPE("verify-xdrf", PRINT_RESULTS << X << "\n")
+//Verbose prints things like progress
+#define DEBUG_VERIFY(X) DEBUG_WITH_TYPE("LIBRARYNAME-output",PRINT_DEBUG << X)
+//Light prints things like more detailed progress
+#define PRINT_VERIFY(X) DEBUG_WITH_TYPE("LIBRARYNAME-output",PRINT_RESULTS << X)
+//Debug should more accurately print exactly what is happening
+#define VERBOSE_VERIFY(X) DEBUG_WITH_TYPE("LIBRARYNAME-verbose",PRINT_DEBUG << X)
 
-#define VERBOSE_VERIFY(X) DEBUG_WITH_TYPE("verify-xdrf-verbose", PRINT_DEBUG << X)
+// #define DEBUG_VERIFY(X) DEBUG_WITH_TYPE("verify-xdrf", PRINT_DEBUG << X)
+// #define PRINT_VERIFY(X) DEBUG_WITH_TYPE("verify-xdrf", PRINT_RESULTS << X << "\n")
+// #define VERBOSE_VERIFY(X) DEBUG_WITH_TYPE("verify-xdrf-verbose", PRINT_DEBUG << X)
 
 #define MONXDRF 0
 #define MOXDRF 1
