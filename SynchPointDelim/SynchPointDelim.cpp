@@ -152,7 +152,9 @@ namespace {
         "RMS_Initial_SemSignal","RMS_Final_SemSignal",
         "RMS_Initial_CondWait","RMS_Final_CondWait",
         "RMS_Initial_CondSignal","RMS_Final_CondSignal",
-        "RMS_Initial_CondBCast","RMS_Final_CondBCast"        
+        "RMS_Initial_CondBCast","RMS_Final_CondBCast",
+        //Takes space in debug output
+        "RMS_Initialization_Done"
      };
     
     //These are the function to treat as if they spawn new
