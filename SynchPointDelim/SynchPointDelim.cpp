@@ -93,7 +93,7 @@
 using namespace llvm;
 using namespace std;
 
-static cl::opt<string> graphOutput("g", cl::desc("Specify output dot file for synchpoint graph"),
+static cl::opt<string> graphOutput("gf", cl::desc("Specify output dot file for synchpoint graph"),
                                    cl::value_desc("filename"));
 
 static cl::opt<bool> cleanPrePost("ccrpp",cl::desc("Do not continue tracking control flow before/after synch points in critical regions if the synch point does not share a synchronization variable with a after/before synch point"));

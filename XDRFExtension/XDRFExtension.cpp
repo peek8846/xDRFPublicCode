@@ -98,7 +98,7 @@
 using namespace llvm;
 using namespace std;
 
-static cl::opt<string> graphOutput2("g2", cl::desc("Specify output dot file for nDRF region graph"),
+static cl::opt<string> graphOutput2("gf2", cl::desc("Specify output dot file for nDRF region graph"),
                                     cl::value_desc("filename"));
 
 static cl::opt<bool> skipConflictStore("nostore",cl::desc("Do not store data access conflict info"));
