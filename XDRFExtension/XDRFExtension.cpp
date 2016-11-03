@@ -79,11 +79,11 @@
 #define PRINT_DEBUG PRINTSTREAM << "XDRFExtension (debug): "
 
 //Verbose prints things like progress
-#define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("LIBRARYNAME-verbose",PRINT << X)
+#define VERBOSE_PRINT(X) DEBUG_WITH_TYPE(LIBRARYNAME"-verbose",PRINT << X)
 //Light prints things like more detailed progress
-#define LIGHT_PRINT(X) DEBUG_WITH_TYPE("LIBRARYNAME-light",PRINT << X)
+#define LIGHT_PRINT(X) DEBUG_WITH_TYPE(LIBRARYNAME"-light",PRINT << X)
 //Debug should more accurately print exactly what is happening
-#define DEBUG_PRINT(X) DEBUG_WITH_TYPE("LIBRARYNAME-debug",PRINT_DEBUG << X)
+#define DEBUG_PRINT(X) DEBUG_WITH_TYPE(LIBRARYNAME"-debug",PRINT_DEBUG << X)
 
 // //Verbose prints things like progress
 // #define VERBOSE_PRINT(X) DEBUG_WITH_TYPE("verbose",PRINT << X)
@@ -544,6 +544,7 @@ namespace {
         }
         
         bool MAYCONFLICT(Instruction* X, Instruction* Y) {
+            LIGHT_PRINT("Checking if " << *X << " conflicts with " << *Y << "\n");
             //if (!isa<StoreInst>(X) && !isa<CallInst>(X)) {
             //True if X is a fun that could write or a store
             bool XcanBeWritingFun=false;
@@ -569,8 +570,10 @@ namespace {
                     }
                 }
                 //If either instruction cannot access memory, there cannot be a conflict
-                if (XdoesNotAccessMemory)
+                if (XdoesNotAccessMemory) {
+                    LIGHT_PRINT("Decided there was no conflict since " << *X << " does not access memory");
                     return false;
+                }
             } else
                 XcanBeWritingFun=true;
             if (!isa<StoreInst>(Y)) {
@@ -587,15 +590,18 @@ namespace {
                     }
                 }
                 //If either instruction cannot access memory, there cannot be a conflict
-                if (YdoesNotAccessMemory)
+                if (YdoesNotAccessMemory) {
+                    LIGHT_PRINT("Decided there was no conflict since " << *Y << " does not access memory");
                     return false;
-                
+                }
             } else
                 YcanBeWritingFun=true;
 
             //Neither one is a store or writing fun
-            if (!XcanBeWritingFun && !YcanBeWritingFun)
+            if (!XcanBeWritingFun && !YcanBeWritingFun) {
+                LIGHT_PRINT("Decided there was no conflict since neither instruction writes to memory");
                 return false;
+            }
             
             return aacombined->MayConflict(X,Y);
         }
