@@ -571,7 +571,7 @@ namespace {
                 }
                 //If either instruction cannot access memory, there cannot be a conflict
                 if (XdoesNotAccessMemory) {
-                    LIGHT_PRINT("Decided there was no conflict since " << *X << " does not access memory");
+                    LIGHT_PRINT("Decided there was no conflict since " << *X << " does not access memory\n");
                     return false;
                 }
             } else
@@ -591,7 +591,7 @@ namespace {
                 }
                 //If either instruction cannot access memory, there cannot be a conflict
                 if (YdoesNotAccessMemory) {
-                    LIGHT_PRINT("Decided there was no conflict since " << *Y << " does not access memory");
+                    LIGHT_PRINT("Decided there was no conflict since " << *Y << " does not access memory\n");
                     return false;
                 }
             } else
@@ -599,7 +599,7 @@ namespace {
 
             //Neither one is a store or writing fun
             if (!XcanBeWritingFun && !YcanBeWritingFun) {
-                LIGHT_PRINT("Decided there was no conflict since neither instruction writes to memory");
+                LIGHT_PRINT("Decided there was no conflict since neither instruction writes to memory\n");
                 return false;
             }
             
