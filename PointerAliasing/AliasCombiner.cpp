@@ -70,7 +70,7 @@ public:
     //then we say it does not alias
     //Note, an "alias" in this sense means that the instructions could access the same data when ran by different threads
     bool MayConflict(Instruction *ptr1, Instruction *ptr2) {
-        DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
+        VERBOSE_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
         bool toReturn=false;
         SmallPtrSet<Value*,4> ptr1args=getArguments(ptr1);
         SmallPtrSet<Value*,4> ptr2args=getArguments(ptr2);
@@ -78,28 +78,28 @@ public:
             if(isa<PointerType>(P1a->getType())) {
                 for (Value *P2a : ptr2args) {
                     if (isa<PointerType>(P2a->getType())) {
-                        DEBUG_PRINT("Determining whether " << *P1a << " and " << *P2a << " may optimistically conflict\n");
+                        LIGHT_PRINT("Determining whether " << *P1a << " and " << *P2a << " may optimistically conflict\n");
                             
                         if (!(canBeShared(P1a) && canBeShared(P2a))) {
-                            DEBUG_PRINT("Determined at least one of them cannot be shared between threads\n");
+                            LIGHT_PRINT("Determined at least one of them cannot be shared between threads\n");
                             continue;
                         }
 
                         if (useUseChainAliasing) {
-                            DEBUG_PRINT("Testing with usechainaliasing\n");
+                            LIGHT_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
                             if (pointerAlias(P1a,P2a,callingPass) == false) {
-                                DEBUG_PRINT("Determined to not alias by use chain analysis\n");
+                                LIGHT_PRINT("Determined to not alias by use chain analysis\n");
                                 continue;
                             }
                             else
-                                DEBUG_PRINT("Was not determined to not alias by usechainaliasing\n");
+                                LIGHT_PRINT("Was not determined to not alias by usechainaliasing\n");
                         }
                         
                         pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
                         //pair<Value*,Value*> comparable=make_pair(P1a,P2a);
                         if (!(comparable.first && comparable.second)) {
-                            DEBUG_PRINT("Failed to find comparable values\n");
+                            LIGHT_PRINT("Failed to find comparable values\n");
                             continue;
                         }
                         
@@ -124,14 +124,14 @@ public:
                         if (isa<GlobalVariable>(comparable.first) && isa<GlobalVariable>(comparable.second)) {
                             //Might want to do more advanced stuff later
                             if (comparable.first == comparable.second) {
-                                DEBUG_PRINT("Determined to alias by virtue of being the same global");
+                                LIGHT_PRINT("Determined to alias by virtue of being the same global");
                                 return true;
                             }
                         }
                         
                         //This is for the weird case where no comparable value is within a function.
                         if (!parent) {
-                            DEBUG_PRINT("Neither comparable value is within a function\n");
+                            LIGHT_PRINT("Neither comparable value is within a function\n");
                             continue;
                         }
 
@@ -140,22 +140,22 @@ public:
                             //bool aliased=false;
                         AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
                         switch (res) {
-                            DEBUG_PRINT("Got NoAlias\n");
+                            LIGHT_PRINT("Got NoAlias\n");
                             if (willAliasLevel > NoAlias) {
                                 break;
                             }
                         case MayAlias:
-                            DEBUG_PRINT("Got MayAlias\n");
+                            LIGHT_PRINT("Got MayAlias\n");
                             if (willAliasLevel > MayAlias) {
                                 break;
                             }
                         case PartialAlias:
-                            DEBUG_PRINT("Got PartialAlias\n");
+                            LIGHT_PRINT("Got PartialAlias\n");
                             if (willAliasLevel > PartialAlias) {
                                 break;
                             }
                         case MustAlias:
-                            DEBUG_PRINT("Got MustAlias\n");
+                            LIGHT_PRINT("Got MustAlias\n");
                         default:
                             aliased=true;
                             break;
@@ -164,14 +164,14 @@ public:
                             LIGHT_PRINT("Determined they did not alias\n");
                             continue;
                         } else {
-                            LIGHT_PRINT("Determined that they aliased\n");
+                            VERBOSE_PRINT("Determined that they aliased\n");
                             return true;
                         }
                     }
                 }
             }
         }
-        DEBUG_PRINT("Returned " << (toReturn ? "true\n" : "false\n"));
+        VERBOSE_PRINT("Returned " << (toReturn ? "true\n" : "false\n"));
         return toReturn;
     }
 
@@ -182,7 +182,7 @@ public:
     //If any alias analysis says they must alias, this returns true. Otherwise returns false
     //more specifically, for each argument we need to prove it does not alias, and if we can then we return false
     bool MustConflict(Instruction *ptr1, Instruction *ptr2) {
-        DEBUG_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are aliasing under any analysis\n");
+        VERBOSE_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are aliasing under any analysis\n");
         bool toReturn=false;
         SmallPtrSet<Value*,4> ptr1args=getArguments(ptr1);
         SmallPtrSet<Value*,4> ptr2args=getArguments(ptr2);
@@ -190,26 +190,26 @@ public:
             if(isa<PointerType>(P1a->getType())) {
                 for (Value *P2a : ptr2args) {
                     if (isa<PointerType>(P2a->getType())) {
-                        DEBUG_PRINT("Determining whether " << *P1a << " and " << *P2a << " may conservatively conflict\n");
+                        LIGHT_PRINT("Determining whether " << *P1a << " and " << *P2a << " may conservatively conflict\n");
 
                         if (!(canBeShared(P1a) && canBeShared(P2a))) {
-                            DEBUG_PRINT("Determined at least one of them cannot be shared between threads\n");
+                            LIGHT_PRINT("Determined at least one of them cannot be shared between threads\n");
                             continue;
                         }
 
                         if (useUseChainAliasing) {
-                            DEBUG_PRINT("Testing with usechainaliasing\n");
+                            LIGHT_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
                             if (pointerAlias(P1a,P2a,callingPass) == true) {
-                                DEBUG_PRINT("Determined to alias by usechainaliasing\n");
+                                LIGHT_PRINT("Determined to alias by usechainaliasing\n");
                                 toReturn=true;
                             }
                             else
-                                DEBUG_PRINT("Was not determined to alias by usechainaliasing\n");
+                                LIGHT_PRINT("Was not determined to alias by usechainaliasing\n");
                         }
                         pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
                         if (!(comparable.first && comparable.second)) {
-                            DEBUG_PRINT("Failed to find comparable values\n");
+                            LIGHT_PRINT("Failed to find comparable values\n");
                             continue;
                         }
 
@@ -234,14 +234,14 @@ public:
                         if (isa<GlobalVariable>(comparable.first) && isa<GlobalVariable>(comparable.second)) {
                             //Might want to do more advanced stuff later
                             if (comparable.first == comparable.second) {
-                                DEBUG_PRINT("Determined to alias by virtue of being the same global");
+                                LIGHT_PRINT("Determined to alias by virtue of being the same global");
                                 return true;
                             }
                         }
                         
                         //This is for the weird case where no comparable value is within a function.
                         if (!parent) {
-                            DEBUG_PRINT("Neither comparable value is within a function\n");
+                            LIGHT_PRINT("Neither comparable value is within a function\n");
                             continue;
                         }
                         
@@ -251,36 +251,37 @@ public:
                         AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
                         switch (res) {
                         case NoAlias:
-                            DEBUG_PRINT("Got NoAlias\n");
+                            LIGHT_PRINT("Got NoAlias\n");
                             if (willAliasLevel > NoAlias) {
                                 break;
                             }
                         case MayAlias:
-                            DEBUG_PRINT("Got MayAlias\n");
+                            LIGHT_PRINT("Got MayAlias\n");
                             if (willAliasLevel > MayAlias) {
                                 break;
                             }
                         case PartialAlias:
-                            DEBUG_PRINT("Got PartialAlias\n");
+                            LIGHT_PRINT("Got PartialAlias\n");
                             if (willAliasLevel > PartialAlias) {
                                 break;
                             }
                         case MustAlias:
-                            DEBUG_PRINT("Got MustAlias\n");
+                            LIGHT_PRINT("Got MustAlias\n");
                         default:
                             aliased=true;
                             break;
                         }
                         if (aliased) {
-                            DEBUG_PRINT("Determined to alias by LLVM alias analysis\n");
+                            VERBOSE_PRINT("Determined to alias by LLVM alias analysis\n");
                             return true;
                         }
                         else
-                            DEBUG_PRINT("Did not find any proof of aliasing\n");
+                            LIGHT_PRINT("Did not find any proof of aliasing\n");
                     }
                 }
             }
         }
+        VERBOSE_PRINT("Did not find proof of aliasing\n");
         return toReturn;
     }
 
@@ -450,7 +451,7 @@ private:
     }
   
     bool mayConflictSameContext(Instruction *ptr1, Value* ptr2) {
-        //DEBUG_PRINT("Checking whether " << *ptr1 << " and " << *ptr2 << " might alias in the same context\n");
+        DEBUG_PRINT("Checking whether " << *ptr1 << " and " << *ptr2 << " might alias in the same context\n");
         // if (useUseChainAliasing) {
         //     DEBUG_PRINT("Testing with usechainaliasing\n");
         //     usechain_wm=module;
@@ -466,8 +467,6 @@ private:
         //for (Pass *results : aliasResults) {
         bool aliased=false;
         Function * parent = dyn_cast<Instruction>(ptr1)->getFunction();
-        DEBUG_PRINT("Done calling alias\n");
-        DEBUG_PRINT(*ptr1 << "\n");
         AliasResult res = getAAResultsForFun(parent)->alias(ptr1,ptr2); 
         switch (res) {
         case NoAlias:
@@ -678,10 +677,11 @@ private:
 
     map<Value*,bool> canBeSharedDynamic;
     bool canBeShared(Value *val) {
+        VERBOSE_PRINT("Determining whether " << *val << " can be shared...\n");
         if (canBeSharedDynamic.count(val) != 0) {
+            VERBOSE_PRINT("Resolved " << *val << "dynamically to " << (canBeSharedDynamic[val] ? "true" : "false") << "\n");
             return canBeSharedDynamic[val];
         }
-        DEBUG_PRINT("Determining whether " << *val << " can be shared...\n");
         //This ensures that recursion does not break us
         canBeSharedDynamic[val]=false;
         
@@ -689,14 +689,14 @@ private:
 
             SmallPtrSet<Function*,1> calledFuns=getCalledFuns(inst);
             if (calledFuns.size() != 0)
-                DEBUG_PRINT("Is a call\n");
+                VERBOSE_PRINT("Is a call\n");
             for (Function * calledFun : calledFuns) {
                 if (calledFun->getName().equals("malloc") ||
                     calledFun->getName().equals("MyMalloc")
                     ) {
-                    DEBUG_PRINT("Called malloc variant\n");
+                    VERBOSE_PRINT("Called malloc variant\n");
                     if (escapeCheck(val)) {
-                        DEBUG_PRINT("Allocation escapes\n");
+                        VERBOSE_PRINT("Allocation escapes\n");
                         return canBeSharedDynamic[val]=true;
                     }
                 }
@@ -704,23 +704,30 @@ private:
                     for (auto it = inst_begin(calledFun);
                          it != inst_end(calledFun); ++it) {
                         if (auto ret = dyn_cast<ReturnInst>(&*it))
-                            if (ret->getReturnValue() && canBeShared(ret->getReturnValue()))
+                            if (ret->getReturnValue() && canBeShared(ret->getReturnValue())) {
+                                VERBOSE_PRINT("Determined " << *val << " could be shared through checking the return from a function\n"); 
                                 return canBeSharedDynamic[val]=true;
+                                
+                            }
                     }
                 }
             }
         }
         if (auto glob = dyn_cast<GlobalVariable>(val)) {
+            VERBOSE_PRINT("Determined " << *val << " could be shared since it is a global\n");
             return canBeSharedDynamic[val]=true;
         }
         if (auto arg = dyn_cast<Argument>(val)) {
-            if (arg->getParent()->hasAddressTaken())
+            if (arg->getParent()->hasAddressTaken()) {
+                VERBOSE_PRINT("Determined " << *val << " could be shared since it is an argument to a function which has its address taken\n");
                 return canBeSharedDynamic[val]=true;
+            }
             for (auto user : arg->getParent()->users()) {
                 if (Instruction *inst = dyn_cast<Instruction>(user)) {
                     if (isCallSite(inst)) {
                         CallSite call(inst);
                         if (canBeShared(call.getArgument(arg->getArgNo())))
+                            VERBOSE_PRINT("Determined " << *val << " could be shared since it is an argument to a function where a parameter passed in could be shared\n");
                             return canBeSharedDynamic[val]=true;
                     }
                 }
@@ -728,24 +735,39 @@ private:
         }
         
         if (auto load = dyn_cast<LoadInst>(val)) {
-            return canBeSharedDynamic[val]=canBeShared(load->getPointerOperand());
+            bool recurseCouldBeShared = canBeSharedDynamic[val]=canBeShared(load->getPointerOperand());
+            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a load from a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
+            return recurseCouldBeShared;
         }
+        //This shouldn't actually be possible?
         if (auto store = dyn_cast<StoreInst>(val)) {
-            return canBeSharedDynamic[val]=canBeShared(store->getPointerOperand());
+            bool recurseCouldBeShared = canBeSharedDynamic[val]=canBeShared(store->getPointerOperand());
+            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a store to a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
+            return recurseCouldBeShared;
+            //return canBeSharedDynamic[val]=canBeShared(store->getPointerOperand());
         }
         if (auto gep = dyn_cast<GetElementPtrInst>(val)) {
-            return canBeSharedDynamic[val]=canBeShared(gep->getPointerOperand());
+            bool recurseCouldBeShared = canBeSharedDynamic[val]=canBeShared(gep->getPointerOperand());
+            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a GEP of a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
+            return recurseCouldBeShared;
+            //return canBeSharedDynamic[val]=canBeShared(gep->getPointerOperand());
         }
         if (auto phi = dyn_cast<PHINode>(val)) {
-            for (Use &use : cast<PHINode>(val)->incoming_values())
-                return canBeSharedDynamic[val]=canBeShared(use.get());
+            bool recurseCouldBeShared = false;
+            for (Use &use : cast<PHINode>(val)->incoming_values()) {
+                recurseCouldBeShared=canBeShared(use.get()) || recurseCouldBeShared;
+            }
+            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a phiNode from values of which " << (recurseCouldBeShared ? "at least one " : "none " ) <<  "could be shared\n");
+            return canBeSharedDynamic[val]=recurseCouldBeShared;
         }
 
         if (val->stripPointerCasts() != val)
-            if (canBeShared(val->stripPointerCasts()))
+            if (canBeShared(val->stripPointerCasts())) {
+                VERBOSE_PRINT("Determined " << *val << " could be shared since it is an dynamic GEP of a pointer that could be shared\n");
                 return canBeSharedDynamic[val]=true;
+            }
 
-        DEBUG_PRINT("Handling of " << *val << " fell through\n");
+        VERBOSE_PRINT("Handling of " << *val << " fell through\n");
         return canBeSharedDynamic[val]=false;
     }
 
