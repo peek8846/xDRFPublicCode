@@ -86,7 +86,7 @@ public:
                         }
 
                         if (useUseChainAliasing) {
-                            LIGHT_PRINT("Testing with usechainaliasing\n");
+                            VERBOSE_PRINT("Testing with usechainaliasing\n");
                             usechain_wm=module;
                             if (pointerAlias(P1a,P2a,callingPass) == false) {
                                 LIGHT_PRINT("Determined to not alias by use chain analysis\n");
@@ -677,9 +677,9 @@ private:
 
     map<Value*,bool> canBeSharedDynamic;
     bool canBeShared(Value *val) {
-        VERBOSE_PRINT("Determining whether " << *val << " can be shared...\n");
+        DEBUG_PRINT("Determining whether " << *val << " can be shared...\n");
         if (canBeSharedDynamic.count(val) != 0) {
-            VERBOSE_PRINT("Resolved " << *val << "dynamically to " << (canBeSharedDynamic[val] ? "true" : "false") << "\n");
+            DEBUG_PRINT("Resolved " << *val << "dynamically to " << (canBeSharedDynamic[val] ? "true" : "false") << "\n");
             return canBeSharedDynamic[val];
         }
         //This ensures that recursion does not break us
@@ -689,14 +689,14 @@ private:
 
             SmallPtrSet<Function*,1> calledFuns=getCalledFuns(inst);
             if (calledFuns.size() != 0)
-                VERBOSE_PRINT("Is a call\n");
+                DEBUG_PRINT("Is a call\n");
             for (Function * calledFun : calledFuns) {
                 if (calledFun->getName().equals("malloc") ||
                     calledFun->getName().equals("MyMalloc")
                     ) {
-                    VERBOSE_PRINT("Called malloc variant\n");
+                    DEBUG_PRINT("Called malloc variant\n");
                     if (escapeCheck(val)) {
-                        VERBOSE_PRINT("Allocation escapes\n");
+                        DEBUG_PRINT("Allocation escapes\n");
                         return canBeSharedDynamic[val]=true;
                     }
                 }
@@ -705,7 +705,7 @@ private:
                          it != inst_end(calledFun); ++it) {
                         if (auto ret = dyn_cast<ReturnInst>(&*it))
                             if (ret->getReturnValue() && canBeShared(ret->getReturnValue())) {
-                                VERBOSE_PRINT("Determined " << *val << " could be shared through checking the return from a function\n"); 
+                                DEBUG_PRINT("Determined " << *val << " could be shared through checking the return from a function\n"); 
                                 return canBeSharedDynamic[val]=true;
                                 
                             }
@@ -714,12 +714,12 @@ private:
             }
         }
         if (auto glob = dyn_cast<GlobalVariable>(val)) {
-            VERBOSE_PRINT("Determined " << *val << " could be shared since it is a global\n");
+            DEBUG_PRINT("Determined " << *val << " could be shared since it is a global\n");
             return canBeSharedDynamic[val]=true;
         }
         if (auto arg = dyn_cast<Argument>(val)) {
             if (arg->getParent()->hasAddressTaken()) {
-                VERBOSE_PRINT("Determined " << *val << " could be shared since it is an argument to a function which has its address taken\n");
+                DEBUG_PRINT("Determined " << *val << " could be shared since it is an argument to a function which has its address taken\n");
                 return canBeSharedDynamic[val]=true;
             }
             for (auto user : arg->getParent()->users()) {
@@ -727,7 +727,7 @@ private:
                     if (isCallSite(inst)) {
                         CallSite call(inst);
                         if (canBeShared(call.getArgument(arg->getArgNo())))
-                            VERBOSE_PRINT("Determined " << *val << " could be shared since it is an argument to a function where a parameter passed in could be shared\n");
+                            DEBUG_PRINT("Determined " << *val << " could be shared since it is an argument to a function where a parameter passed in could be shared\n");
                             return canBeSharedDynamic[val]=true;
                     }
                 }
@@ -736,19 +736,19 @@ private:
         
         if (auto load = dyn_cast<LoadInst>(val)) {
             bool recurseCouldBeShared = canBeSharedDynamic[val]=canBeShared(load->getPointerOperand());
-            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a load from a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
+            DEBUG_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a load from a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
             return recurseCouldBeShared;
         }
         //This shouldn't actually be possible?
         if (auto store = dyn_cast<StoreInst>(val)) {
             bool recurseCouldBeShared = canBeSharedDynamic[val]=canBeShared(store->getPointerOperand());
-            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a store to a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
+            DEBUG_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a store to a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
             return recurseCouldBeShared;
             //return canBeSharedDynamic[val]=canBeShared(store->getPointerOperand());
         }
         if (auto gep = dyn_cast<GetElementPtrInst>(val)) {
             bool recurseCouldBeShared = canBeSharedDynamic[val]=canBeShared(gep->getPointerOperand());
-            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a GEP of a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
+            DEBUG_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a GEP of a pointer that could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared\n");
             return recurseCouldBeShared;
             //return canBeSharedDynamic[val]=canBeShared(gep->getPointerOperand());
         }
@@ -757,17 +757,17 @@ private:
             for (Use &use : cast<PHINode>(val)->incoming_values()) {
                 recurseCouldBeShared=canBeShared(use.get()) || recurseCouldBeShared;
             }
-            VERBOSE_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a phiNode from values of which " << (recurseCouldBeShared ? "at least one " : "none " ) <<  "could be shared\n");
+            DEBUG_PRINT("Determined " << *val << " could " << (recurseCouldBeShared ? "" : "not " ) <<  "be shared since it is a phiNode from values of which " << (recurseCouldBeShared ? "at least one " : "none " ) <<  "could be shared\n");
             return canBeSharedDynamic[val]=recurseCouldBeShared;
         }
 
         if (val->stripPointerCasts() != val)
             if (canBeShared(val->stripPointerCasts())) {
-                VERBOSE_PRINT("Determined " << *val << " could be shared since it is an dynamic GEP of a pointer that could be shared\n");
+                DEBUG_PRINT("Determined " << *val << " could be shared since it is an dynamic GEP of a pointer that could be shared\n");
                 return canBeSharedDynamic[val]=true;
             }
 
-        VERBOSE_PRINT("Handling of " << *val << " fell through\n");
+        DEBUG_PRINT("Handling of " << *val << " fell through\n");
         return canBeSharedDynamic[val]=false;
     }
 
