@@ -69,7 +69,7 @@
 //Verbose prints things like progress
 #define DEBUG_VERIFY(X) DEBUG_WITH_TYPE(LIBRARYNAME"-output",PRINT_DEBUG << X)
 //Light prints things like more detailed progress
-#define PRINT_VERIFY(X) DEBUG_WITH_TYPE(LIBRARYNAME"-output",PRINT_RESULTS << X)
+#define PRINT_VERIFY(X) DEBUG_WITH_TYPE(LIBRARYNAME"-output",PRINT_RESULTS << X << "\n")
 //Debug should more accurately print exactly what is happening
 #define VERBOSE_VERIFY(X) DEBUG_WITH_TYPE(LIBRARYNAME"-verbose",PRINT_DEBUG << X)
 
