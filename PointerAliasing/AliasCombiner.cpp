@@ -51,9 +51,6 @@ public:
     }
 
     AliasCombiner(Module *mod, bool useUseChain, Pass *callingPass) {
-        // module=mod;
-        // useUseChainAliasing=useUseChain;
-        // this->callingPass=callingPass;
         AliasCombiner(mod, useUseChain, callingPass, MustAlias);
     }
 
@@ -62,125 +59,121 @@ public:
         useUseChainAliasing=useUseChain;
         willAliasLevel=aliasLevel;
         this->callingPass=callingPass;
-        //flowSensitive=FlowSensitive::createFSWPA(*mod);
     }
 
+
+    //DEPRECATED, use MustConflict instead
     //If any alias analysis says they do not alias, this returns false. Otherwise returns true.
     //More specifically, if we can for each argument to the instruction find atleast one proof it does not alias
     //then we say it does not alias
     //Note, an "alias" in this sense means that the instructions could access the same data when ran by different threads
-    bool MayConflict(Instruction *ptr1, Instruction *ptr2) {
-        VERBOSE_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
-        bool toReturn=false;
-        SmallPtrSet<Value*,4> ptr1args=getArguments(ptr1);
-        SmallPtrSet<Value*,4> ptr2args=getArguments(ptr2);
-        for (Value *P1a : ptr1args) {
-            if(isa<PointerType>(P1a->getType())) {
-                for (Value *P2a : ptr2args) {
-                    if (isa<PointerType>(P2a->getType())) {
-                        LIGHT_PRINT("Determining whether " << *P1a << " and " << *P2a << " may optimistically conflict\n");
+    // bool MayConflict(Instruction *ptr1, Instruction *ptr2) {
+    //     VERBOSE_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are not aliasing under any analysis\n");
+    //     bool toReturn=false;
+    //     SmallPtrSet<Value*,4> ptr1args=getArguments(ptr1);
+    //     SmallPtrSet<Value*,4> ptr2args=getArguments(ptr2);
+    //     for (Value *P1a : ptr1args) {
+    //         if(isa<PointerType>(P1a->getType())) {
+    //             for (Value *P2a : ptr2args) {
+    //                 if (isa<PointerType>(P2a->getType())) {
+    //                     LIGHT_PRINT("Determining whether " << *P1a << " and " << *P2a << " may optimistically conflict\n");
                             
-                        if (!(canBeShared(P1a) && canBeShared(P2a))) {
-                            LIGHT_PRINT("Determined at least one of them cannot be shared between threads\n");
-                            continue;
-                        }
+    //                     if (!(canBeShared(P1a) && canBeShared(P2a))) {
+    //                         LIGHT_PRINT("Determined at least one of them cannot be shared between threads\n");
+    //                         continue;
+    //                     }
 
-                        if (useUseChainAliasing) {
-                            VERBOSE_PRINT("Testing with usechainaliasing\n");
-                            usechain_wm=module;
-                            if (pointerAlias(P1a,P2a,callingPass) == false) {
-                                LIGHT_PRINT("Determined to not alias by use chain analysis\n");
-                                continue;
-                            }
-                            else
-                                LIGHT_PRINT("Was not determined to not alias by usechainaliasing\n");
-                        }
+    //                     if (useUseChainAliasing) {
+    //                         VERBOSE_PRINT("Testing with usechainaliasing\n");
+    //                         usechain_wm=module;
+    //                         if (pointerAlias(P1a,P2a,callingPass) == false) {
+    //                             LIGHT_PRINT("Determined to not alias by use chain analysis\n");
+    //                             continue;
+    //                         }
+    //                         else
+    //                             LIGHT_PRINT("Was not determined to not alias by usechainaliasing\n");
+    //                     }
                         
-                        pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
-                        //pair<Value*,Value*> comparable=make_pair(P1a,P2a);
-                        if (!(comparable.first && comparable.second)) {
-                            LIGHT_PRINT("Failed to find comparable values\n");
-                            continue;
-                        }
+    //                     pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
+    //                     //pair<Value*,Value*> comparable=make_pair(P1a,P2a);
+    //                     if (!(comparable.first && comparable.second)) {
+    //                         LIGHT_PRINT("Failed to find comparable values\n");
+    //                         continue;
+    //                     }
                         
-                        Function * parent = NULL;
-                        if (Instruction * inst = dyn_cast<Instruction>(comparable.first)) {
-                            parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
-                        }
-                        if (Argument * inst = dyn_cast<Argument>(comparable.first)) {
-                            parent=inst->getParent() ? inst->getParent() : parent;
-                        }
-                        if (Instruction * inst = dyn_cast<Instruction>(comparable.second)) {
-                            parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
-                        }
-                        if (Argument * inst = dyn_cast<Argument>(comparable.second)) {
-                            parent=inst->getParent() ? inst->getParent() : parent;
-                        }
+    //                     Function * parent = NULL;
+    //                     if (Instruction * inst = dyn_cast<Instruction>(comparable.first)) {
+    //                         parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
+    //                     }
+    //                     if (Argument * inst = dyn_cast<Argument>(comparable.first)) {
+    //                         parent=inst->getParent() ? inst->getParent() : parent;
+    //                     }
+    //                     if (Instruction * inst = dyn_cast<Instruction>(comparable.second)) {
+    //                         parent=inst->getParent()->getParent() ? inst->getParent()->getParent() : parent;
+    //                     }
+    //                     if (Argument * inst = dyn_cast<Argument>(comparable.second)) {
+    //                         parent=inst->getParent() ? inst->getParent() : parent;
+    //                     }
                         
-                        LIGHT_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
-                        LIGHT_PRINT("Which have types: " << typeid(*comparable.first).name() << " and " << typeid(*comparable.second).name() << "\n");
+    //                     LIGHT_PRINT("Comparing " << *(comparable.first) << " and " << *(comparable.second) << "\n");
+    //                     LIGHT_PRINT("Which have types: " << typeid(*comparable.first).name() << " and " << typeid(*comparable.second).name() << "\n");
 
-                        //Some shortcutting is desirable here
-                        if (isa<GlobalVariable>(comparable.first) && isa<GlobalVariable>(comparable.second)) {
-                            //Might want to do more advanced stuff later
-                            if (comparable.first == comparable.second) {
-                                LIGHT_PRINT("Determined to alias by virtue of being the same global");
-                                return true;
-                            }
-                        }
+    //                     //Some shortcutting is desirable here
+    //                     if (isa<GlobalVariable>(comparable.first) && isa<GlobalVariable>(comparable.second)) {
+    //                         //Might want to do more advanced stuff later
+    //                         if (comparable.first == comparable.second) {
+    //                             LIGHT_PRINT("Determined to alias by virtue of being the same global");
+    //                             return true;
+    //                         }
+    //                     }
                         
-                        //This is for the weird case where no comparable value is within a function.
-                        if (!parent) {
-                            LIGHT_PRINT("Neither comparable value is within a function\n");
-                            continue;
-                        }
+    //                     //This is for the weird case where no comparable value is within a function.
+    //                     if (!parent) {
+    //                         LIGHT_PRINT("Neither comparable value is within a function\n");
+    //                         continue;
+    //                     }
 
-                        bool aliased=false;
-                        //for (Pass *aa : aliasResults) {
-                            //bool aliased=false;
-                        AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
-                        switch (res) {
-                            LIGHT_PRINT("Got NoAlias\n");
-                            if (willAliasLevel > NoAlias) {
-                                break;
-                            }
-                        case MayAlias:
-                            LIGHT_PRINT("Got MayAlias\n");
-                            if (willAliasLevel > MayAlias) {
-                                break;
-                            }
-                        case PartialAlias:
-                            LIGHT_PRINT("Got PartialAlias\n");
-                            if (willAliasLevel > PartialAlias) {
-                                break;
-                            }
-                        case MustAlias:
-                            LIGHT_PRINT("Got MustAlias\n");
-                        default:
-                            aliased=true;
-                            break;
-                        }
-                        if (!aliased) {
-                            LIGHT_PRINT("Determined they did not alias\n");
-                            continue;
-                        } else {
-                            VERBOSE_PRINT("Determined that they aliased\n");
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        VERBOSE_PRINT("Returned " << (toReturn ? "true\n" : "false\n"));
-        return toReturn;
-    }
-
-    // bool MustConflict(Instruction *ptr1, Instruction *ptr2) {
-    //     return MayConflict(ptr1,ptr2);
+    //                     bool aliased=false;
+    //                     //for (Pass *aa : aliasResults) {
+    //                         //bool aliased=false;
+    //                     AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
+    //                     switch (res) {
+    //                         LIGHT_PRINT("Got NoAlias\n");
+    //                         if (willAliasLevel > NoAlias) {
+    //                             break;
+    //                         }
+    //                     case MayAlias:
+    //                         LIGHT_PRINT("Got MayAlias\n");
+    //                         if (willAliasLevel > MayAlias) {
+    //                             break;
+    //                         }
+    //                     case PartialAlias:
+    //                         LIGHT_PRINT("Got PartialAlias\n");
+    //                         if (willAliasLevel > PartialAlias) {
+    //                             break;
+    //                         }
+    //                     case MustAlias:
+    //                         LIGHT_PRINT("Got MustAlias\n");
+    //                     default:
+    //                         aliased=true;
+    //                         break;
+    //                     }
+    //                     if (!aliased) {
+    //                         LIGHT_PRINT("Determined they did not alias\n");
+    //                         continue;
+    //                     } else {
+    //                         VERBOSE_PRINT("Determined that they aliased\n");
+    //                         return true;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     VERBOSE_PRINT("Returned " << (toReturn ? "true\n" : "false\n"));
+    //     return toReturn;
     // }
 
-    //If any alias analysis says they must alias, this returns true. Otherwise returns false
-    //more specifically, for each argument we need to prove it does not alias, and if we can then we return false
+    //For each argument we need to prove it does not alias, and if we can then we return false
     bool MustConflict(Instruction *ptr1, Instruction *ptr2) {
         VERBOSE_PRINT("Examining whether accesses " << *ptr1 << " and " << *ptr2 << " are aliasing under any analysis\n");
         bool toReturn=false;
@@ -197,16 +190,6 @@ public:
                             continue;
                         }
 
-                        if (useUseChainAliasing) {
-                            LIGHT_PRINT("Testing with usechainaliasing\n");
-                            usechain_wm=module;
-                            if (pointerAlias(P1a,P2a,callingPass) == true) {
-                                LIGHT_PRINT("Determined to alias by usechainaliasing\n");
-                                toReturn=true;
-                            }
-                            else
-                                LIGHT_PRINT("Was not determined to alias by usechainaliasing\n");
-                        }
                         pair<Value*,Value*> comparable=getComparableValues(P1a,P2a);
                         if (!(comparable.first && comparable.second)) {
                             LIGHT_PRINT("Failed to find comparable values\n");
@@ -246,9 +229,22 @@ public:
                         }
                         
                         bool aliased=false;
-                        //for (Pass *aa : aliasResults) {
-                        
+
+                        LIGHT_PRINT("Testing with LLVM AAs\n");
                         AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
+                        LIGHT_PRINT("Got " << res << "\n");
+                        
+                        //If we get "mayalias" then use the usechainaliasing instead
+                        if (useUseChainAliasing) {
+                            LIGHT_PRINT("Testing with usechainaliasing\n");
+                            usechain_wm=module;
+                            AliasResult usechainresult = pointerAlias(P1a,P2a,callingPass);
+                            LIGHT_PRINT("Got " << usechainresult << "\n");
+                            if (res == MayAlias) {
+                                res=usechainresult;
+                            }                                
+                        }
+                        
                         switch (res) {
                         case NoAlias:
                             LIGHT_PRINT("Got NoAlias\n");
@@ -285,18 +281,11 @@ public:
         return toReturn;
     }
 
-    // void addAliasResult(Pass *result) {
-    //     aliasResults.push_back(result);
-    // }
-
 private:
 
     Module *module;
     Pass *callingPass;
 
-    // FlowSensitive *flowSensitive;
-
-    // list<Pass*> aliasResults;
     map<Function*,AAResults*> AAResultMap;
 
     map<pair<Instruction*,Instruction*>,bool> shortcutConservative;
@@ -308,7 +297,6 @@ private:
         }
         BasicAAResult * newbase = new BasicAAResult(createLegacyPMBasicAAResult(*callingPass,*parent));
         AAResults *newaares = new AAResults(createLegacyPMAAResults(*callingPass,*parent,*newbase));
-        //*newaares=createLegacyPMAAResults(*callingPass,*parent,base);
         return AAResultMap[parent]=newaares;
     }
                                      
