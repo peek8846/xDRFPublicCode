@@ -603,7 +603,7 @@ namespace {
                 return false;
             }
             
-            return aacombined->MayConflict(X,Y);
+            return aacombined->MustConflict(X,Y);
         }
         
         //Returns a pair:
