@@ -30,7 +30,7 @@
 
 
 bool AssumeDGEPAliasConstBase = true;
-bool AssumeDGEPNoAlias = true;
+bool AssumeDGEPNoAlias = false;
 
 Module *usechain_wm;
 Pass *callingPass;
@@ -62,11 +62,11 @@ Type *getTypeOfPointerType(Type *ptr) {
 //Obtains the set of functions that can be immediately called when
 //executing inst
 SmallPtrSet<Function*,1> getCalledFuns(Instruction *inst) {
-  LIGHT_PRINT("Finding functions that can be called by " << *inst << "\n");
+  //LIGHT_PRINT("Finding functions that can be called by " << *inst << "\n");
   SmallPtrSet<Function*,1> toReturn;
   SmallPtrSet<Value*,8> alreadyVisited;
   if (isCallSite(inst)) {
-    DEBUG_PRINT("which is a callsite\n");
+    //DEBUG_PRINT("which is a callsite\n");
     CallSite call = CallSite(inst);
     Value *calledValue = call.getCalledValue();
     //Rather than doing this: would it be possible with a decent AA to just
@@ -82,7 +82,7 @@ SmallPtrSet<Function*,1> getCalledFuns(Instruction *inst) {
       alreadyVisited.insert(nextValue);
       //Try to resolve the value into a function
       if (auto fun = dyn_cast<Function>(nextValue)) {
-	LIGHT_PRINT(fun->getName() << " could be called\n");
+	//LIGHT_PRINT(fun->getName() << " could be called\n");
 	toReturn.insert(fun);
       }
       //Since we are dealing with functions, only a few
@@ -110,7 +110,7 @@ SmallPtrSet<Function*,1> getCalledFuns(Instruction *inst) {
       }
       //Return a dummy "Null" value
       else if (auto inlineasm = dyn_cast<InlineAsm>(nextValue)) {
-      	LIGHT_PRINT("Could call assembly\n");
+      	//LIGHT_PRINT("Could call assembly\n");
 	toReturn.insert(NULL);
       }
       //Here we pick apart data structures
@@ -190,7 +190,7 @@ bool isBaseConstantInLoopSCEV(Value *val, ConstantInt **base, Function *containi
   // if (scev_val != SE->getSCEV(val)) {
   //     errs() << "Resolved non-constant to: " << **base << "\n";
   // }
-  DEBUG_PRINT("Sucessfully reduced to " << *base << "\n");
+  DEBUG_PRINT("Sucessfully reduced to " << **base << "\n");
   return true;
   //return false;
 }
@@ -375,11 +375,12 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
 	if (!AssumeDGEPNoAlias) {
 	  DEBUG_PRINT("Conservatively set offset to dynamic\n");
 	  intoffset = -1;
-	} else
+	} else {
 	  DEBUG_PRINT("Optimistically discarded this comparison route\n");
 	  nextPointers.erase(dyngep->getPointerOperand());
+	}
       } else {
-	DEBUG_PRINT("Resolved dynamic GEP\n");
+	DEBUG_PRINT("Resolved dynamic GEP to" << offset.getLimitedValue() << "\n");
 	intoffset = offset.getLimitedValue();
       }
     } else {
@@ -392,6 +393,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
       }
     }
   }
+
   if (auto phi = dyn_cast<PHINode>(strip)) {
     DEBUG_PRINT("When stripped is phinode " << *phi << "\n");
     appendOffset = false;
@@ -420,8 +422,9 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
       }
       toReturn.insert(make_pair(retPair->first,newList));
     }
+    DEBUG_PRINT("Done resolving " << *nextPoint << "\n");
   }
-  DEBUG_PRINT("Done finding BLUs for " << *val << "\n");
+  DEBUG_PRINT("Done finding BLUs for " << *val << ", found " << toReturn.size() << " values\n");
 #undef UNIFY_OFFSETS
   return toReturn;
 }
@@ -431,13 +434,13 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
    return findBottomLevelValues_(val);
  }
  
- map<pair<Value*,Value*>, bool> pointerAliasDynamic;
+ map<pair<Value*,Value*>, AliasResult> pointerAliasDynamic;
  
- bool pointerAlias(Value *pt1, Value *pt2, Pass *callingpass) {
+ AliasResult pointerAlias(Value *pt1, Value *pt2, Pass *callingpass) {
   VERBOSE_PRINT("Comparing " << *pt1 << " and " << *pt2 << "\n");
   //errs() << "Usechainpointeralias is comparing " << *pt1 << " and " << *pt2 << "\n";
   if (pointerAliasDynamic.count(make_pair(pt1,pt2)) != 0) {
-    VERBOSE_PRINT("Dynamically resolved to  " << (pointerAliasDynamic[make_pair(pt1,pt2)] ? "aliasing" : "not aliasing") << "\n");
+    VERBOSE_PRINT("Dynamically resolved to  " << pointerAliasDynamic[make_pair(pt1,pt2)] << "\n");
     //errs() << "Was previously resolved to " << (pointerAliasDynamic[make_pair(pt1,pt2)] ? "aliasing" : "not aliasing") << "\n"; 
     return pointerAliasDynamic[make_pair(pt1,pt2)];
   }
@@ -453,7 +456,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
   LIGHT_PRINT(*pt1 << " bottomUserSize " << bottomUsesPt1.size() << "\n");
   LIGHT_PRINT(*pt2 << " bottomUserSize " << bottomUsesPt2.size() << "\n");
   
-  bool toReturn = false;
+  AliasResult toReturn = NoAlias;
 
   for (set<pair<Value*,list<int> > >::iterator pt1pair = bottomUsesPt1.begin(),
 	 end_pt1pair = bottomUsesPt1.end();
@@ -476,6 +479,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
       auto pt1b = pt1pair->second.rbegin();
       auto pt2b = pt2pair->second.rbegin();
       bool listChecksOut = true;
+      bool strictMatch = true;
       DEBUG_PRINT("Started comparisons of indexing lists\n");
       while (pt1b != pt1pair->second.rend() &&
 	     pt2b != pt2pair->second.rend()) {
@@ -484,6 +488,10 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
 	  DEBUG_PRINT("Indexes were different\n");
 	  listChecksOut = false;
 	  break;
+	}
+	if (*pt1b == -1 || *pt2b == -1) {
+	  DEBUG_PRINT("Atleast one index was dynamic\n");
+	  strictMatch = false;
 	}
 	pt1b++;
 	pt2b++;
@@ -494,13 +502,19 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
 	continue;
       }
       if (listChecksOut) {
-	LIGHT_PRINT("BLUs aliased\n");
-	toReturn = true;
+	if (!strictMatch) {
+	  LIGHT_PRINT("BLUs may alias\n");
+	  if (toReturn != MustAlias)
+	    toReturn = MayAlias;
+	} else {
+	  LIGHT_PRINT("BlUs must alias\n");
+	  toReturn = MustAlias;
+	}
       }
     }
   }
   
-  VERBOSE_PRINT("Determined to " << (toReturn ? "alias" : "not alias") << "\n");
+  VERBOSE_PRINT("Determined to " << toReturn << "\n");
   return pointerAliasDynamic[make_pair(pt1,pt2)]=toReturn;
 }
 
