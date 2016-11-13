@@ -1086,7 +1086,7 @@ namespace {
             SmallPtrSet<Function*,1> toReturn;
             SmallPtrSet<Value*,8> alreadyVisited;
             if (isCallSite(inst)) {
-                DEBUG_PRINT("which is a callsite\n");
+                LIGHT_PRINT("which is a callsite\n");
                 CallSite call = CallSite(inst);
                 Value *calledValue = call.getCalledValue();
                 //Rather than doing this: would it be possible with a decent AA to just
