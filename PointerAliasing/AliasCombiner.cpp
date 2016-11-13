@@ -338,7 +338,7 @@ private:
                     parent1=val1_a->getParent();
                 for (Value* val2_c : compareTowards2) {
                     if (isa<GlobalValue>(val1_e) || isa<GlobalValue>(val2_c))
-                        if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_c)))
+                        //if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_c)))
                             return make_pair(val1_e,val2_c);
                     Function *parent2=NULL;
                     if (Instruction *val2_i = dyn_cast<Instruction>(val2_c))
@@ -350,7 +350,7 @@ private:
                 }
                 for (Value* val2_e : expandNext2) {
                     if (isa<GlobalValue>(val1_e) || isa<GlobalValue>(val2_e))
-                        if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_e)))
+                        //if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_e)))
                             return make_pair(val1_e,val2_e);
                     Function *parent2=NULL;
                     if (Instruction *val2_i = dyn_cast<Instruction>(val2_e))
@@ -370,7 +370,7 @@ private:
                     parent2=val2_a->getParent();
                 for (Value* val1_c : compareTowards1) {
                     if (isa<GlobalValue>(val1_c) || isa<GlobalValue>(val2_e))
-                        if (!(isa<GlobalValue>(val1_c) && isa<GlobalValue>(val2_e)))
+                        //if (!(isa<GlobalValue>(val1_c) && isa<GlobalValue>(val2_e)))
                             return make_pair(val1_c,val2_e);
                     Function *parent1=NULL;
                     if (Instruction *val1_i = dyn_cast<Instruction>(val1_c))
@@ -406,7 +406,7 @@ private:
                 if (canGetOutsideContext) {
                     for (Value * val1_oc : oContext) {
                         val1_oc = val1_oc->stripPointerCasts();
-                        if (compareTowards1.count(val1_oc))
+                        if (compareTowards1.count(val1_oc) == 0)
                             expandNext1_new.insert(val1_oc);
                     }
                 }
