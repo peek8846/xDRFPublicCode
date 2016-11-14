@@ -38,7 +38,7 @@ shift
 
 opt -S \
     -internalize -internalize-public-api-list "main" -adce -globaldce\
-    $targetFile -o .internal_temp2~
+    $targetFile -o .internal_temp1~
 
 opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
       $llvmAAs $xdrfAs -aalevel MayAlias -nousechain -trace 1 $@\
