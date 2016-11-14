@@ -115,6 +115,7 @@ namespace {
         }
 
         bool dependsOnThread(Value * val) {
+            LIGHT_PRINT("Checked whether " << *val << " was dependent on thread arguments... " << (threadDependantValues.count(val)!=0 ? "it was" : "it wasn't") << "\n");
             return threadDependantValues.count(val)!=0;
         }
 
