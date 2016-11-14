@@ -73,6 +73,7 @@
 //#include "SynchPointDelim.hpp"
 //#include "../PointerAliasing/UseChainAliasing.cpp"
 #include "../PointerAliasing/AliasCombiner.cpp"
+//#include "../ThreadDependantAnalysis/ThreadDependance.cpp"
 
 #define LIBRARYNAME "SynchPointDelim"
 
@@ -193,6 +194,7 @@ namespace {
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
             AU.addRequired<AAResultsWrapperPass>();
             AU.addRequired<AssumptionCacheTracker>();
+            AU.addRequired<ThreadDependence>();
             AU.addRequired<TargetLibraryInfoWrapperPass>();
             AU.addRequired<ScalarEvolutionWrapperPass>();
             AU.setPreservesAll();

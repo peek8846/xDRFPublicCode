@@ -240,7 +240,7 @@ public:
                             usechain_wm=module;
                             AliasResult usechainresult = pointerAlias(P1a,P2a,callingPass);
                             LIGHT_PRINT("Got " << usechainresult << "\n");
-                            if (res == MayAlias) {
+                            if (res == MayAlias || usechainresult == NoAlias) {
                                 res=usechainresult;
                             }                                
                         }
@@ -268,7 +268,7 @@ public:
                             break;
                         }
                         if (aliased) {
-                            VERBOSE_PRINT("Determined to alias by LLVM alias analysis\n");
+                            VERBOSE_PRINT("Determined to alias\n");
                             return true;
                         }
                         else

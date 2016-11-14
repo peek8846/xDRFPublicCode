@@ -11,6 +11,8 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include <list>
 
+#include "../ThreadDependantAnalysis/ThreadDependence.cpp"
+
 // // #include "llvm/Analysis/ScalarEvolution.h"
 // #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 
@@ -30,6 +32,7 @@
 
 
 bool AssumeDGEPAliasConstBase = true;
+bool AssumeDependantIndexesDontAlias = true;
 bool AssumeDGEPNoAlias = false;
 
 Module *usechain_wm;
@@ -195,6 +198,24 @@ bool isBaseConstantInLoopSCEV(Value *val, ConstantInt **base, Function *containi
   //return false;
 }
 
+
+//Returns whether any index of the dynamic gep depends on a thread argument
+bool gepDependsOnThreadArgument(Value *GEP) {
+  DEBUG_PRINT("Checking whether indices to " << *GEP << " could depend on thread arguments\n");
+  ThreadDependence &TD = callingPass->getAnalysis<ThreadDependence>();
+  for (auto it = dyn_cast<GetElementPtrInst>(GEP)->idx_begin(),
+	 et = dyn_cast<GetElementPtrInst>(GEP)->idx_end();
+       it != et; ++it) {
+    if (TD.dependsOnThread(*it)) {
+      DEBUG_PRINT(**it << " could depend on thread arguments\n");
+      return true;
+    }
+  }
+  DEBUG_PRINT("They could not\n");
+  return false;
+}
+
+
 //Returns wether the dynamic gep was resolved
 bool handleDynamicGEP(Value **pt_,APInt &offset) {
   //errs() << "!Detected dynamic use of GEP: " << **pt_ << ", #yolo-ing it\n";                    
@@ -206,6 +227,7 @@ bool handleDynamicGEP(Value **pt_,APInt &offset) {
   DEBUG_PRINT("Trying to resolve dynamic GEP " << *pt << "\n");
   Function *containingFun = dyn_cast<Function>(dyn_cast<Instruction>(*pt_)->getParent()->getParent());
   Type* nextType = dyn_cast<CompositeType>(dyn_cast<GetElementPtrInst>(pt)->getPointerOperand()->getType());
+
   for (auto it = dyn_cast<GetElementPtrInst>(pt)->idx_begin(),
 	 et = dyn_cast<GetElementPtrInst>(pt)->idx_end();
        it != et; ++it) {
@@ -213,6 +235,7 @@ bool handleDynamicGEP(Value **pt_,APInt &offset) {
     assert(isa<CompositeType>(nextType) && "Broken Dynamic GEP detected");
     CompositeType *currType = cast<CompositeType>(nextType);
     ConstantInt *constant = NULL;
+
     bool isConstant = isBaseConstantInLoopSCEV(*it, &constant,containingFun);
     if (!isConstant) {
       DEBUG_PRINT("Was not constant when using SCEV\n");
@@ -287,7 +310,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
   set<pair<Value*,list<int> > > toReturn;
   bool appendOffset = true;
   SmallPtrSet<Value*,2> nextPointers;
-
+  
   if (visitedBottomLevelValues.count(val) != 0)
     return toReturn;
   visitedBottomLevelValues.insert(val);
@@ -368,7 +391,11 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
     DEBUG_PRINT("When stripped is dynamic gep " << *dyngep << ", added pointer operand to nextpointers\n");
     nextPointers.insert(dyngep->getPointerOperand());
     appendOffset = false;
-    if (AssumeDGEPAliasConstBase) {
+
+    if (AssumeDependantIndexesDontAlias && gepDependsOnThreadArgument(dyngep)) {
+      DEBUG_PRINT("Determined to vary based on thread arguments\n");
+      intoffset = -2;
+    } else if (AssumeDGEPAliasConstBase) {
       DEBUG_PRINT("Attempting to resolve dynamic GEP using SCEV\n");
       if (!handleDynamicGEP(&strip,offset)) {
 	DEBUG_PRINT("Did not manage to resolve dynamic GEP\n");
@@ -452,7 +479,7 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
 
   //errs() << "pt1 bUses size: " << bottomUsesPt1.size() << "\n";
   //errs() << "pt2 bUses size: " << bottomUsesPt2.size() << "\n";
-
+  
   LIGHT_PRINT(*pt1 << " bottomUserSize " << bottomUsesPt1.size() << "\n");
   LIGHT_PRINT(*pt2 << " bottomUserSize " << bottomUsesPt2.size() << "\n");
   
@@ -484,6 +511,13 @@ set<pair<Value*,list<int> > > findBottomLevelValues_(Value *val) {
       while (pt1b != pt1pair->second.rend() &&
 	     pt2b != pt2pair->second.rend()) {
 	DEBUG_PRINT("Comparing " << *pt1b << " and " << *pt2b << "\n");
+
+	if (*pt1b == -2 || *pt2b == -2) {
+	  DEBUG_PRINT("Atleast one of the indices were dynamic and depends on thread arguments. Optimistically the index lists are then different\n"); 
+	  listChecksOut = false;
+	  break;
+	}
+	
 	if (*pt1b != -1 && *pt2b != -1 && *pt1b != *pt2b) {
 	  DEBUG_PRINT("Indexes were different\n");
 	  listChecksOut = false;

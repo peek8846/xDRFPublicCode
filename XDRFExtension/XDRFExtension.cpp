@@ -70,6 +70,7 @@
 #include "../SynchPointDelim/SynchPointDelim.cpp"
 #include "../SynchPointDelim/SynchPoint.hpp"
 #include "../PointerAliasing/AliasCombiner.cpp"
+//#include "../ThreadDependantAnalysis/ThreadDependance.cpp"
 
 #define LIBRARYNAME "XDRFExtension"
 
@@ -255,6 +256,7 @@ namespace {
             AU.addRequired<AssumptionCacheTracker>();
             AU.addRequired<TargetLibraryInfoWrapperPass>();
             AU.addRequired<SynchPointDelim>();
+            AU.addRequired<ThreadDependence>();
             AU.addRequired<ScalarEvolutionWrapperPass>();
             AU.setPreservesAll();
         }

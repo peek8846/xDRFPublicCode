@@ -60,7 +60,7 @@
 //#include "../Utils/SkelUtils/CallingDAE.cpp"
 //#include "../Utils/SkelUtils/MetadataInfo.h"
 
-#define LIBRARYNAME "ThreadDependance"
+#define LIBRARYNAME "ThreadDependence"
 
 //Define moderately pretty printing functions
 #define PRINTSTREAM errs()
@@ -79,9 +79,9 @@ using namespace std;
 
 
 namespace {
-    struct ThreadDependance : public ModulePass {
+    struct ThreadDependence : public ModulePass {
         static char ID;
-        ThreadDependance() : ModulePass(ID) {}
+        ThreadDependence() : ModulePass(ID) {}
 
     public:
         int DR_ID;
@@ -370,11 +370,11 @@ namespace {
 
 
 
-char ThreadDependance::ID = 0;
-static RegisterPass<ThreadDependance> X("thread-dependance",
+char ThreadDependence::ID = 0;
+static RegisterPass<ThreadDependence> V("thread-dependence",
                                         "Determines the values that might depend on thread arguments",
-                                  true,
-                                  true);
+                                        true,
+                                        true);
 
 /* Local Variables: */
 /* mode: c++ */
