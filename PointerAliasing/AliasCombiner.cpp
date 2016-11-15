@@ -248,19 +248,22 @@ public:
                         switch (res) {
                         case NoAlias:
                             LIGHT_PRINT("Got NoAlias\n");
-                            if (willAliasLevel > NoAlias) {
-                                break;
+                            if (willAliasLevel < MayAlias) {
+                                aliased=true;
                             }
+                            break;
                         case MayAlias:
                             LIGHT_PRINT("Got MayAlias\n");
-                            if (willAliasLevel > MayAlias) {
-                                break;
+                            if (willAliasLevel < PartialAlias) {
+                                aliased=true;
                             }
+                            break;
                         case PartialAlias:
                             LIGHT_PRINT("Got PartialAlias\n");
-                            if (willAliasLevel > PartialAlias) {
-                                break;
+                            if (willAliasLevel < MustAlias) {
+                                aliased=true;
                             }
+                            break;
                         case MustAlias:
                             LIGHT_PRINT("Got MustAlias\n");
                         default:
@@ -338,7 +341,7 @@ private:
                     parent1=val1_a->getParent();
                 for (Value* val2_c : compareTowards2) {
                     if (isa<GlobalValue>(val1_e) || isa<GlobalValue>(val2_c))
-                        //if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_c)))
+                        if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_c)))
                             return make_pair(val1_e,val2_c);
                     Function *parent2=NULL;
                     if (Instruction *val2_i = dyn_cast<Instruction>(val2_c))
@@ -350,7 +353,7 @@ private:
                 }
                 for (Value* val2_e : expandNext2) {
                     if (isa<GlobalValue>(val1_e) || isa<GlobalValue>(val2_e))
-                        //if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_e)))
+                        if (!(isa<GlobalValue>(val1_e) && isa<GlobalValue>(val2_e)))
                             return make_pair(val1_e,val2_e);
                     Function *parent2=NULL;
                     if (Instruction *val2_i = dyn_cast<Instruction>(val2_e))
@@ -370,7 +373,7 @@ private:
                     parent2=val2_a->getParent();
                 for (Value* val1_c : compareTowards1) {
                     if (isa<GlobalValue>(val1_c) || isa<GlobalValue>(val2_e))
-                        //if (!(isa<GlobalValue>(val1_c) && isa<GlobalValue>(val2_e)))
+                        if (!(isa<GlobalValue>(val1_c) && isa<GlobalValue>(val2_e)))
                             return make_pair(val1_c,val2_e);
                     Function *parent1=NULL;
                     if (Instruction *val1_i = dyn_cast<Instruction>(val1_c))
@@ -392,20 +395,22 @@ private:
             //At this point, none of the previous values have been in the same function. So we must expand them
             SmallPtrSet<Value*,4> expandNext1_new;
             for (Value * val1_e : expandNext1) {
+                DEBUG_PRINT("Finding values outside context that alias with " << *val1_e << "\n");
                 val1_e = val1_e->stripPointerCasts();
                 bool canGetOutsideContext=false;
                 SmallPtrSet<Value*,2> oContext;
                 if (auto val1_i = dyn_cast<Instruction>(val1_e)) {
-                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val1_i,foundGlobalForVal1);
+                    oContext = getAliasedValuesOutsideContext(val1_i,foundGlobalForVal1);
                     canGetOutsideContext=true;
                 }
                 if (auto val1_a = dyn_cast<Argument>(val1_e)) {
-                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val1_a);
+                    oContext = getAliasedValuesOutsideContext(val1_a);
                     canGetOutsideContext=true;
                 }
                 if (canGetOutsideContext) {
                     for (Value * val1_oc : oContext) {
                         val1_oc = val1_oc->stripPointerCasts();
+                        DEBUG_PRINT("Attempting to add value " << *val1_oc << " to the next expand set\n");
                         if (compareTowards1.count(val1_oc) == 0)
                             expandNext1_new.insert(val1_oc);
                     }
@@ -414,20 +419,22 @@ private:
             expandNext1=expandNext1_new;
             SmallPtrSet<Value*,4> expandNext2_new;
             for (Value * val2_e : expandNext2) {
+                DEBUG_PRINT("Finding values outside context that alias with " << *val2_e << "\n");
                 val2_e = val2_e->stripPointerCasts();
                 bool canGetOutsideContext=false;
                 SmallPtrSet<Value*,2> oContext;
                 if (auto val2_i = dyn_cast<Instruction>(val2_e)) {	
-                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val2_i,foundGlobalForVal2);
+                    oContext = getAliasedValuesOutsideContext(val2_i,foundGlobalForVal2);
                     canGetOutsideContext=true;
                 }
                 if (auto val2_a = dyn_cast<Argument>(val2_e)) {	
-                    SmallPtrSet<Value*,2> oContext = getAliasedValuesOutsideContext(val2_a);
+                    oContext = getAliasedValuesOutsideContext(val2_a);
                     canGetOutsideContext=true;
                 }
                 if (canGetOutsideContext) {
                     for (Value * val2_oc : oContext) {
                         val2_oc = val2_oc->stripPointerCasts();
+                        DEBUG_PRINT("Attempting to add value " << *val2_oc << " to the next expand set\n");
                         if (compareTowards2.count(val2_oc) == 0)
                             expandNext2_new.insert(val2_oc);
                     }
@@ -435,6 +442,7 @@ private:
             }
             expandNext2=expandNext2_new;
         }
+        
         return make_pair((Value*)NULL,(Value*)NULL);
     }
   
@@ -458,23 +466,29 @@ private:
         AliasResult res = getAAResultsForFun(parent)->alias(ptr1,ptr2); 
         switch (res) {
         case NoAlias:
-            //                    if (willAliasLevel > NoAlias) {
+            DEBUG_PRINT("Got NoAlias\n");
+            //if (willAliasLevel > NoAlias) {
             break;
             //}
         case MayAlias:
+            DEBUG_PRINT("Got MayAlias\n");
             //if (willAliasLevel > MayAlias) {
-            //break;
+            break;
             //}
         case PartialAlias:
-            // if (willAliasLevel > PartialAlias) {
-            //     break;
-            // }
+            DEBUG_PRINT("Got PartialAlias\n");
+            aliased=true;
+            break;
+            //if (willAliasLevel > PartialAlias) {
+            //break;
+            //}
         case MustAlias:
         default:
+            DEBUG_PRINT("Got MustAlias\n");
             aliased=true;
             break;
         }
-        DEBUG_PRINT("Done with switch...\n");
+        //DEBUG_PRINT("Done with switch...\n");
         if (!aliased) {
             toReturn=false;
         }
@@ -515,7 +529,7 @@ private:
         return toReturn;
     }
 
-    SmallPtrSet<Value*,2> getAliasedValuesOutsideContext(Instruction *val,bool &comparetoglobsalready) {
+    SmallPtrSet<Value*,2> getAliasedValuesOutsideContext(Instruction *val,bool &comparedtoglobsalready) {
         SmallPtrSet<Value*,2> toReturn;
         for (Argument &arg : val->getParent()->getParent()->getArgumentList()) {
             if (isa<PointerType>(arg.getType()) && mayConflictSameContext(val,&arg)) {
@@ -529,11 +543,11 @@ private:
                 }
             }
         }
-        if (comparetoglobsalready) {
+        if (!comparedtoglobsalready) {
             for (GlobalValue &glob : module->getGlobalList()) {
                 if (isa<PointerType>(glob.getType()) && mayConflictSameContext(val,&glob)) {
                     toReturn.insert(&glob);
-                    comparetoglobsalready=true;
+                    comparedtoglobsalready=true;
                 }
             }
         }
