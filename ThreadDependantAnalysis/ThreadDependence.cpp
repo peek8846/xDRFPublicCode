@@ -325,6 +325,75 @@ namespace {
                 ptr = p->getElementType();
             return ptr;
         }
+
+        map<Value*,SmallPtrSet<Value*,1> > getBaseOfPointerDynamic;
+        SmallPtrSet<Value*,1> getBaseOfPointer(Value * pointer) {
+            SmallPtrSet<Value*,1> toReturn;
+            if (!isa<PointerType>(pointer->getType())) {
+                return toReturn;
+            }
+            if (getBaseOfPointerDynamic.count(pointer) != 0)
+                return getBaseOfPointerDynamic[pointer];
+            
+            getBaseOfPointerDynamic[pointer]=toReturn;
+            
+            Value * stripped = pointer->stripInBoundsConstantOffsets();
+            if (auto load = dyn_cast<LoadInst>(stripped)) {
+                SmallPtrSet<Value*,1> interResult = getBaseOfPointer(load->getPointerOperand());
+                toReturn.insert(interResult.begin(),interResult.end());
+            }
+            if (auto arg = dyn_cast<Argument>(stripped)) {
+                for (auto user : arg->getParent()->users()) {
+                    if (Instruction *inst = dyn_cast<Instruction>(user)) {
+                        if (isCallSite(inst)) {
+                            CallSite call(inst);
+                            SmallPtrSet<Value*,1> interResult=getBaseOfPointer(call.getArgument(arg->getArgNo()));
+                            toReturn.insert(interResult.begin(),interResult.end());
+                        }
+                    }
+                }
+            }
+            if (auto phi = dyn_cast<PHINode>(stripped)) {
+                for (Use &use : phi->incoming_values()) {
+                    SmallPtrSet<Value*,1> interResult = getBaseOfPointer(use.get());
+                    toReturn.insert(interResult.begin(),interResult.end());
+                }
+            }
+            if (auto gep = dyn_cast<GetElementPtrInst>(stripped)) {
+                SmallPtrSet<Value*,1> interResult = getBaseOfPointer(gep->getPointerOperand());
+                toReturn.insert(interResult.begin(),interResult.end());
+            }
+            if (auto glob = dyn_cast<GlobalVariable>(stripped)) {
+                toReturn.insert(glob);
+            }
+            if (auto alloc = dyn_cast<AllocaInst>(stripped)) {
+                toReturn.insert(alloc);
+            }
+            if (auto inst = dyn_cast<Instruction>(stripped)) {
+                
+                SmallPtrSet<Function*,1> calledFuns=getCalledFuns(inst);
+                for (Function * calledFun : calledFuns) {
+                    if (calledFun->getName().equals("malloc") ||
+                        calledFun->getName().equals("MyMalloc")
+                        ) {
+                        toReturn.insert(inst);
+                    }
+                    else {
+                        for (auto it = inst_begin(calledFun);
+                             it != inst_end(calledFun); ++it) {
+                            if (auto ret = dyn_cast<ReturnInst>(&*it)) {
+                                if (ret->getReturnValue()) {
+                                    SmallPtrSet<Value*,1> interResult = getBaseOfPointer(ret->getReturnValue());
+                                    toReturn.insert(interResult.begin(),interResult.end());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return getBaseOfPointerDynamic[pointer]=toReturn;
+        }
         
         void trackDerivedValues(Value * startingPoint) {
             if (threadDependantValues.count(startingPoint) != 0) {
@@ -356,8 +425,10 @@ namespace {
                         DEBUG_PRINT("Done coloring arguments for " << fun->getName() << " \n");
                     }
                 } else if (auto store = dyn_cast<StoreInst>(*use)) {
-                    DEBUG_PRINT("Was a store inst, coloring the pointer operand\n");
-                    trackDerivedValues(store->getPointerOperand());
+                    DEBUG_PRINT("Was a store inst, coloring the root of the pointer operand\n");
+                    SmallPtrSet<Value*,1> rootPointers = getBaseOfPointer(store->getPointerOperand());
+                    for (Value * val : rootPointers)
+                        trackDerivedValues(val);
                 } else {
                     DEBUG_PRINT("Plainly coloring it\n");
                     trackDerivedValues(*use);
