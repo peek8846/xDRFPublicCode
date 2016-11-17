@@ -45,10 +45,12 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/NoFolder.h"
 
-
+#include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -86,6 +88,10 @@ namespace {
     public:
         int DR_ID;
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
+            // AU.addRequired<AssumptionCacheTracker>();
+            // AU.addRequired<TargetLibraryInfoWrapperPass>();
+            AU.addRequiredTransitive<ScalarEvolutionWrapperPass>();
+            AU.setPreservesAll();
         }
 
         virtual bool runOnModule(Module &M) {
@@ -106,10 +112,10 @@ namespace {
             }
 
             VERBOSE_PRINT("Colored a total of " << threadDependantValues.size() << " values\n");
-            DEBUG_PRINT("Colored:\n");
-            for (Value * val  : threadDependantValues) {
-                DEBUG_PRINT(*val << "\n");
-            }
+            // DEBUG_PRINT("Colored:\n");
+            // for (Value * val  : threadDependantValues) {
+            //     DEBUG_PRINT(*val << "\n");
+            // }
 
             return false;
         }
@@ -326,19 +332,29 @@ namespace {
             return ptr;
         }
 
+        
+        
+        //Gets the possible highes-level pointers who can only refer to locations that the argument could refer to
         map<Value*,SmallPtrSet<Value*,1> > getBaseOfPointerDynamic;
         SmallPtrSet<Value*,1> getBaseOfPointer(Value * pointer) {
+            DEBUG_PRINT("Finding base pointer for " << *pointer << "\n");
             SmallPtrSet<Value*,1> toReturn;
             if (!isa<PointerType>(pointer->getType())) {
+                DEBUG_PRINT("Wasn't a pointer\n");
                 return toReturn;
             }
-            if (getBaseOfPointerDynamic.count(pointer) != 0)
+            if (getBaseOfPointerDynamic.count(pointer) != 0) {
+                DEBUG_PRINT("Resolved dynamically\n");
                 return getBaseOfPointerDynamic[pointer];
+            }
             
             getBaseOfPointerDynamic[pointer]=toReturn;
             
             Value * stripped = pointer->stripInBoundsConstantOffsets();
+            DEBUG_PRINT("Stripped to " << *stripped << "\n");
+
             if (auto load = dyn_cast<LoadInst>(stripped)) {
+                DEBUG_PRINT("Was pointer loaded from " << *(load->getPointerOperand()) << "\n");
                 SmallPtrSet<Value*,1> interResult = getBaseOfPointer(load->getPointerOperand());
                 toReturn.insert(interResult.begin(),interResult.end());
             }
@@ -347,6 +363,7 @@ namespace {
                     if (Instruction *inst = dyn_cast<Instruction>(user)) {
                         if (isCallSite(inst)) {
                             CallSite call(inst);
+                            DEBUG_PRINT("Was argument, one parameter is: " << call.getArgument(arg->getArgNo()) << "\n");
                             SmallPtrSet<Value*,1> interResult=getBaseOfPointer(call.getArgument(arg->getArgNo()));
                             toReturn.insert(interResult.begin(),interResult.end());
                         }
@@ -355,18 +372,106 @@ namespace {
             }
             if (auto phi = dyn_cast<PHINode>(stripped)) {
                 for (Use &use : phi->incoming_values()) {
+                    DEBUG_PRINT("Was phinode with incoming value " << *(use.get()) << "\n");
                     SmallPtrSet<Value*,1> interResult = getBaseOfPointer(use.get());
                     toReturn.insert(interResult.begin(),interResult.end());
                 }
             }
             if (auto gep = dyn_cast<GetElementPtrInst>(stripped)) {
+                DEBUG_PRINT("Was dynamic GEP " << *(gep) << "\n");
                 SmallPtrSet<Value*,1> interResult = getBaseOfPointer(gep->getPointerOperand());
                 toReturn.insert(interResult.begin(),interResult.end());
+
+                // LIGHT_PRINT("Attempting to get base pointer through a non-constant GEP\n");
+                // ScalarEvolution &SE = getAnalysis<ScalarEvolutionWrapperPass>(*(gep->getParent()->getParent())).getSE();
+                // // const SCEV* scev = SE.getSCEV(gep);
+                // // LIGHT_PRINT("SCEV got " << *scev << "\n");
+                // SmallPtrSet<Value*,1> basePointers = getBaseOfPointer(gep->getPointerOperand());
+
+                // LIGHT_PRINT("Got base pointers for " << *gep << "\n");
+
+                // for (Value* basePointer : basePointers) {
+                //     LIGHT_PRINT("Possible base pointer " << *basePointer << " being examined for domination\n");
+                //     Type * basePointerType = basePointer->getType();
+                //     LIGHT_PRINT("Which has type: " << *basePointerType << " (which has type " << typeid(*basePointerType).name() << ")\n");
+                //     LIGHT_PRINT("Checking to see if we can acquire the possible range for the pointer...\n");
+                //     int elementCount = -1;
+                //     int dominatorIndex = 0;
+                //     if (basePointerType->isStructTy()) {
+                //         LIGHT_PRINT("Was a struct with " << basePointerType->getStructNumElements() << " elements\n");
+                //         elementCount = basePointerType->getStructNumElements();
+                //     }
+                //     else if (basePointerType->isArrayTy()) {
+                //         LIGHT_PRINT("Was a struct with " << basePointerType->getArrayNumElements() << " elements\n");
+                //         elementCount = basePointerType->getArrayNumElements();
+                //     }
+                //     else if (basePointerType->isVectorTy()) {
+                //         LIGHT_PRINT("Was a struct with " << basePointerType->getVectorNumElements() << " elements\n");
+                //         elementCount = basePointerType->getVectorNumElements();
+                //     }
+                //     else if (basePointerType->isPointerTy()) {
+                //         dominatorIndex = 1;
+                //         LIGHT_PRINT("Was a pointer type pointing at " << *(basePointerType->getPointerElementType()) << "\n");
+                //         Type * dereferedPointer = basePointerType->getPointerElementType();
+                //         LIGHT_PRINT("Got " << *dereferedPointer << ", checking size again\n");
+                //         if (dereferedPointer->isStructTy()) {
+                //             LIGHT_PRINT("Was a struct with " << dereferedPointer->getStructNumElements() << " elements\n");
+                //             elementCount = dereferedPointer->getStructNumElements();
+                //         }
+                //         else if (dereferedPointer->isArrayTy()) {
+                //             LIGHT_PRINT("Was a struct with " << dereferedPointer->getArrayNumElements() << " elements\n");
+                //             elementCount = dereferedPointer->getArrayNumElements();
+                //         }
+                //         else if (dereferedPointer->isVectorTy()) {
+                //             LIGHT_PRINT("Was a struct with " << dereferedPointer->getVectorNumElements() << " elements\n");
+                //             elementCount = dereferedPointer->getVectorNumElements();
+                //         } else {
+                //             LIGHT_PRINT("Could not\n");
+                //         }
+                //     } else {
+                //         LIGHT_PRINT("Could not\n");
+                //     }
+                    
+                //     if (elementCount > -1) {
+                //         LIGHT_PRINT("Checking if GEP dominates pointer range\n");
+                //         auto index = gep->idx_begin();
+                //         // for (int i = 0; i < dominatorIndex;  ++i) {index++;};
+                //         DEBUG_PRINT("Checking index " << **index << "\n");
+                //         const SCEV* dominatorIndexScev = SE.getSCEV(*index);
+                //         LIGHT_PRINT("Got scev " << *dominatorIndexScev << "\n");
+                //         if (auto cast = dyn_cast<SCEVCastExpr>(dominatorIndexScev)) {
+                //             LIGHT_PRINT("Was cast from " << *(cast->getOperand()) << "\n");
+                //             LIGHT_PRINT("Which was a " << cast->getOperand()->getSCEVType() << "\n");
+                //         }
+
+                //         ConstantRange indexRange = SE.getSignedRange(dominatorIndexScev);
+                //         LIGHT_PRINT("Has range " << indexRange << "\n");
+                //         if (indexRange == ConstantRange(APInt(indexRange.getUnsignedMin().getBitWidth(),0),
+                //                                         APInt(indexRange.getUnsignedMin().getBitWidth(),elementCount))) {
+                //             LIGHT_PRINT("which dominated pointer range\n");
+                //             toReturn.insert(basePointer);
+                //         }
+                //         else {
+                //             LIGHT_PRINT("which did not dominate pointer range\n");
+                //         }
+                //     }
+                // }
+                
+                // //assert(false && "UNIMPLEMENTED - GEP SCEV resolution");
+                
+                // if (basePointers.size() == 0) {
+                //     LIGHT_PRINT("Found no base pointers\n");
+                // }
+                
+
             }
+            
             if (auto glob = dyn_cast<GlobalVariable>(stripped)) {
+                DEBUG_PRINT("Was a global, plainly\n");
                 toReturn.insert(glob);
             }
             if (auto alloc = dyn_cast<AllocaInst>(stripped)) {
+                DEBUG_PRINT("Was an alloca, plainly\n");
                 toReturn.insert(alloc);
             }
             if (auto inst = dyn_cast<Instruction>(stripped)) {
@@ -376,6 +481,7 @@ namespace {
                     if (calledFun->getName().equals("malloc") ||
                         calledFun->getName().equals("MyMalloc")
                         ) {
+                        DEBUG_PRINT("Was an allocation\n");
                         toReturn.insert(inst);
                     }
                     else {
@@ -383,6 +489,7 @@ namespace {
                              it != inst_end(calledFun); ++it) {
                             if (auto ret = dyn_cast<ReturnInst>(&*it)) {
                                 if (ret->getReturnValue()) {
+                                    DEBUG_PRINT("Was call to a function that could return " << ret->getReturnValue() << "\n");
                                     SmallPtrSet<Value*,1> interResult = getBaseOfPointer(ret->getReturnValue());
                                     toReturn.insert(interResult.begin(),interResult.end());
                                 }
@@ -391,7 +498,7 @@ namespace {
                     }
                 }
             }
-            
+            DEBUG_PRINT("Done finding pointers for " << *pointer << "\n");
             return getBaseOfPointerDynamic[pointer]=toReturn;
         }
         
