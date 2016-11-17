@@ -31,9 +31,14 @@
 #define DEBUG_PRINT(X) DEBUG_WITH_TYPE(LIBRARYNAME"-debug",PRINT_DEBUG << X)
 
 
-bool AssumeDGEPAliasConstBase = true;
-bool AssumeDependantIndexesDontAlias = true;
-bool AssumeDGEPNoAlias = false;
+//bool AssumeDGEPAliasConstBase = true;
+static cl::opt<bool> AssumeDGEPAliasConstBase("no-dgep-alias-constbase",cl::desc("Do not resolve dynamic GEP offsets to their base in recursive SCEVs"));
+
+//bool AssumeDependantIndexesDontAlias = true;
+static cl::opt<bool> AssumeDependantIndexesDontAlias("no-dependant-index-noalias",cl::desc("Do not assume that GEP indices which depend on thread arguments make GEPs safe"),cl::init(true));
+
+//bool AssumeDGEPNoAlias = false;
+static cl::opt<bool> AssumeDGEPNoAlias("degep-noalias",cl::desc("Assume that GEP indices which are dynamic make GEPs safe"),cl::init(true));
 
 Module *usechain_wm;
 Pass *callingPass;
