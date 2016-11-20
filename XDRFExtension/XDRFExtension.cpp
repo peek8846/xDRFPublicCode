@@ -106,6 +106,8 @@ static cl::opt<bool> skipConflictStore("nostore",cl::desc("Do not store data acc
 
 static cl::opt<bool> pruneSurroundingSets("ano",cl::desc("Assume that any instruction inside an nDRF region cannot conflict with other instructions when also encountered in an xDRF region"));
 
+static cl::opt<bool> useSpecializedCrossCheck("specialized-cc",cl::desc("Ignore read-after-write and write-after-write conflicts"));
+
 //static cl::opt<bool> noCycleDRFAliasing("adcs",cl::desc("Assume that instructions in DRF regions within cycles in the synchronization point graph cannot conflict with instructions within the same cycle"));
 
 static cl::opt<AliasResult> ALIASLEVEL("aalevel",cl::desc("The required aliasing level to detect a conflict"),
@@ -544,6 +546,94 @@ namespace {
             }
             return toReturn;
         }
+
+        // bool MAYCONFLICT_NDRF_DRF(Instruction* X, Instruction* Y) {
+        //     if (useSpecializedCrossCheck) {
+        //         return MAYCONFLICT_SPECC2(X,Y);
+        //     } else {
+        //         return MAYCONFLICT(X,Y);
+        //     }
+        // }
+
+        //Checks conflicts between DRFs and nDRFs. Here either X or Y can be within a DRF or nDRF, but X has to be
+        //"before" Y
+        bool MAYCONFLICT_DRF_NDRF(Instruction* X, Instruction* Y) {
+            if (useSpecializedCrossCheck) {
+                return MAYCONFLICT_SPECC(X,Y);
+            } else {
+                return MAYCONFLICT(X,Y);
+            }
+        }
+
+        bool MAYCONFLICT_DRF_DRF(Instruction* X, Instruction* Y) {
+            return MAYCONFLICT(X,Y);
+        }
+
+        bool MAYCONFLICT_SPECC(Instruction* X, Instruction* Y) {
+            LIGHT_PRINT("Checking if " << *X << " conflicts with " << *Y << "\n");
+            //True if X is a fun that could write or a store
+            bool XcanBeWritingFun=false;
+            //True if Y is a fun that could write or a store
+            bool YcanBeWritingFun=false;
+
+            //True if X is not a store or a load and only calls functions that do not access memory
+            bool XdoesNotAccessMemory=false;
+            //True if Y is not a store and only calls functions that do not access memory
+            bool YdoesNotAccessMemory=false;
+            
+            if (!isa<StoreInst>(X)) {
+                if (!isa<LoadInst>(X))
+                    XdoesNotAccessMemory=true;
+                for (Function *fun : getCalledFuns(X)) {
+                    if (!fun->doesNotAccessMemory()) {
+                        XdoesNotAccessMemory=false;
+                    }
+                    if (!fun->onlyReadsMemory()) {
+                        XcanBeWritingFun=true;
+                        XdoesNotAccessMemory=false;
+                        break;
+                    }
+                }
+                //If either instruction cannot access memory, there cannot be a conflict
+                if (XdoesNotAccessMemory) {
+                    LIGHT_PRINT("Decided there was no conflict since " << *X << " does not access memory\n");
+                    return false;
+                }
+            } else
+                XcanBeWritingFun=true;
+            if (!isa<StoreInst>(Y)) {
+                if (!isa<LoadInst>(Y))
+                    YdoesNotAccessMemory=true;
+                for (Function *fun : getCalledFuns(Y)) {
+                    if (!fun->doesNotAccessMemory()) {
+                        YdoesNotAccessMemory=false;
+                    }
+                    if (!fun->onlyReadsMemory()) {
+                        YcanBeWritingFun=true;
+                        YdoesNotAccessMemory=false;
+                        break;
+                    }
+                }
+                //If either instruction cannot access memory, there cannot be a conflict
+                if (YdoesNotAccessMemory) {
+                    LIGHT_PRINT("Decided there was no conflict since " << *Y << " does not access memory\n");
+                    return false;
+                }
+            } else
+                YcanBeWritingFun=true;
+
+            //Neither one is a store or writing fun
+            if (!XcanBeWritingFun && !YcanBeWritingFun) {
+                LIGHT_PRINT("Decided there was no conflict since neither instruction writes to memory\n");
+                return false;
+            }
+
+            //Both are stores or there is a read-after-write non-conflict (special case)
+            if (XcanBeWritingFun)
+                return false;
+            
+            return aacombined->MustConflict(X,Y);
+        }
         
         bool MAYCONFLICT(Instruction* X, Instruction* Y) {
             LIGHT_PRINT("Checking if " << *X << " conflicts with " << *Y << "\n");
@@ -669,7 +759,7 @@ namespace {
             for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {    
                 for (Instruction * instAfter : toCompareAgainst) {
                     //Comparing instructions to themselves, in case of loops, is perfectly fine
-                    if (MAYCONFLICT(instPre,instAfter)) {
+                    if (MAYCONFLICT_DRF_DRF(instPre,instAfter)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsBetweenDRF.insert(make_pair(instPre,instAfter));
                         DEBUG_PRINT("Found conflict between preceding and following DRF regions\n");
@@ -680,7 +770,7 @@ namespace {
                 for (nDRFRegion * region : followingRegions) {
                     if (region) {
                         for (Instruction * instIn : region->containedInstructions) {
-                            if (MAYCONFLICT(instPre,instIn)) {
+                            if (MAYCONFLICT_DRF_NDRF(instPre,instIn)) {
                                 if (!skipConflictStore)
                                     regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(region,instIn)));
                                 DEBUG_PRINT("Found conflict between preceding DRF and following nDRF regions\n");
@@ -693,7 +783,7 @@ namespace {
             //Check the instructions within our nDRF towards all previous and following insts
             for (Instruction * instIn : regionToExtend->containedInstructions) {
                 for (Instruction * instPre : regionToExtend->getPrecedingInsts()) {   
-                    if (MAYCONFLICT(instPre,instIn)) {
+                    if (MAYCONFLICT_DRF_NDRF(instPre,instIn)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsTowardsDRF.insert(make_pair(instPre,make_pair(regionToExtend,instIn)));
                         DEBUG_PRINT("Found conflict between nDRF region and preceding DRF regions\n");
@@ -701,7 +791,7 @@ namespace {
                     }
                 }
                 for (Instruction * instAfter : toCompareAgainst) {   
-                    if (MAYCONFLICT(instAfter,instIn)) {
+                    if (MAYCONFLICT_DRF_NDRF(instIn,instAfter)) {
                         if (!skipConflictStore)
                             regionToExtend->conflictsTowardsDRF.insert(make_pair(instAfter,make_pair(regionToExtend,instIn)));
                         DEBUG_PRINT("Found conflict between nDRF region and following DRF regions\n");
