@@ -90,7 +90,7 @@ namespace {
         virtual void getAnalysisUsage(AnalysisUsage &AU) const{
             // AU.addRequired<AssumptionCacheTracker>();
             // AU.addRequired<TargetLibraryInfoWrapperPass>();
-            AU.addRequiredTransitive<ScalarEvolutionWrapperPass>();
+            AU.addRequired<ScalarEvolutionWrapperPass>();
             AU.setPreservesAll();
         }
 
