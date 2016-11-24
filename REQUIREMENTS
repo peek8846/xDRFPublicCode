@@ -1,0 +1,5 @@
+Known requirements:
+
+cmake 3.2.2 or later
+LLVM 3.8, compiled with cmake and RTTI on
+There have been issues compiling with newer versions of gcc, confirmed to work with gcc 4.9.4

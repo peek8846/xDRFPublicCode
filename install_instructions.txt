@@ -42,6 +42,12 @@
   2c. Locate pass binary
     The built pass resides in <xDRF-prefix>/xDRF-build/XDRFExtension/XDRFExtension.so
 
+3. See if SVF works
+  3a. The SVF binary is in the repo pre-built. It MIGHT work on your setup (worth a try, right?) but otherwise you will
+    have to re-build it. See instructions on http://github.com/unsw-corg/SVF/wiki/Setup-Guide#getting-started for how to
+    do this. Note that the version of SVF included in the repo is a slightly older one so it can only be built with automake.
+    (Which also means that if you re-build it, you will need an additional build of LLVM 3.8 with automake)
+
 3. Running the pass
   3a. For now, include the entire file <xDRF-prefix>/xDRF-src/XDRFExtension/XDRFExtension.cpp
     into your own program/pass. Later, there will instead be a more light-weight header file to include that ensures
