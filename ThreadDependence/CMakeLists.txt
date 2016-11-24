@@ -1,0 +1,1 @@
+add_library(ThreadDependantAnalysis MODULE ThreadDependence.cpp)
