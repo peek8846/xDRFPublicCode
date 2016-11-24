@@ -1,3 +1,22 @@
-GIT Repo for the code for the xDRF delimitation and optimization project
+GIT Repo for the code for the xDRF delimitation and optimization project.
+
+The project loosely executes in 5 phases
+1: Determine synchronization operations in a program, and construct a graph of these operations according to control flow
+2: Determine the synchronization variables used by synchronization operations
+3: Determine critical (nDRF) regions based on 1
+4: Determine the enclaveness of each nDRF region by cross-checking preceding and following xDRF paths based on 2 and 3
+5: Mark the border of ndRF and xDRF regions in code with marker functions based on 4
+
+Passes included:
+Main passes:
+SynchPointDelim : Executes 1, 2 and 3
+XDRFExtension : Executes 4
+MarkXDRFRegions : Executes 5
+
+Auxiliary passes:
+ThreadDependence : Determines which values in a program are derived from thread arguments or may contain values derived from thread arguments
+MarkRMSRegions : Created nDRF-style marker functions from RMS-style marker functions
+PathRMSFunctions : Deprecated
 
 See the install_instructions file for information on how to install and use the passes
+
