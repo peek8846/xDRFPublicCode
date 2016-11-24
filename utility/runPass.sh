@@ -7,7 +7,7 @@ MarkXDRFRegionsSo=$XDRF_BUILD/MarkXDRFRegions/libMarkXDRFRegions.so
 VerifyXDRFSo=$XDRF_BUILD/VerifyXDRF/libVerifyXDRF.so
 FlowSensitiveSo=$XDRF_BUILD/../xDRF-src/SVF-master/Release+Asserts/lib/libwpa.so
 MarkRMSRegionsSo=$XDRF_BUILD/MarkRMSRegions/libMarkRMSRegions.so
-ThreadDependanceSo=$XDRF_BUILD/ThreadDependantAnalysis/libThreadDependantAnalysis.so
+ThreadDependanceSo=$XDRF_BUILD/ThreadDependence/libThreadDependence.so
 # if [ ! -e $SynchPointDelimSo ] ; then
 #     echo "Could not find SynchPointDelim pass, make sure you have setup the env and compiled the passes"
 #     exit 1
