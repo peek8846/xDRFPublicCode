@@ -49,12 +49,14 @@
     (Which also means that if you re-build it, you will need an additional build of LLVM 3.8 with automake)
 
 3. Running the pass
-  3a. For now, include the entire file <xDRF-prefix>/xDRF-src/XDRFExtension/XDRFExtension.cpp
-    into your own program/pass. Later, there will instead be a more light-weight header file to include that ensures
-    you do not need to re-compile XDRFExtension together with your program.
+  3a. For various reasons, include the entire file <xDRF-prefix>/xDRF-src/XDRFExtension/XDRFExtension.cpp
+    into your own program/pass. This will define all the xDRF core passes in your program.
   
   3b. Require the pass in your program/pass, by specifying  "AnalysisUsage.addRequired<XDRFExtension>()" in your
     analysis usage.
+
+  3b2. You can also make use of the in-code marker functions. By doing "opt -load <xDRF-prefix/xDRF-build/MarkXDRFRegions.so -SPDelim -XDRFextend -MarkXDRF <file>"
+    marker functions will be inserted into the .ll code.
 
   3c. Run the pass together with your pass with opt, by specifying "opt -load <xDRF-prefix>/xDRF-build/XDRFExtension/XDRFExtension.so -SPDelim -XDRFextend <your stuff here>"
 
@@ -67,3 +69,7 @@
     of a particular instruction or determine whether two instructions are within the same xDRF regions. Feel free to come
     with suggestions.
 
+Caveats: The analysis does require some information about the targeted program ahead of time. Namely if you are linking with a library at the back-end, the
+   analysis needs to know the behaviour of the library functions. Namely it needs to know the synchronization behaviour of these functions. For most standard C/C++
+   functions this is already correctly defined, but if your target includes synchronizing functions that are not part of the C/C++ standard then the behaviour
+   must be defined in SynchPointDelim.cpp
