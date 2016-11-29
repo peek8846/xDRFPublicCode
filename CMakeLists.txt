@@ -15,5 +15,5 @@ add_subdirectory(MarkXDRFRegions)
 add_subdirectory(MarkRMSRegions)
 add_subdirectory(PatchRMSFunctions)
 add_subdirectory(VerifyXDRF)
-add_subdirectory(ThreadDependantAnalysis)
+add_subdirectory(ThreadDependenceAnalysis)
 
