@@ -13,7 +13,8 @@ ThreadDependanceSo=$XDRF_BUILD/ThreadDependantAnalysis/libThreadDependantAnalysi
 #     exit 1
 # fi
 
-llvmAAs="-scalar-evolution -basicaa -globals-aa -thread-dependence"
+llvmAAs="-scalar-evolution -basicaa -globals-aa -tbaa -scev-aa"
+#llvmAAs="-disable-basicaa"
 xdrfAs="-thread-dependence -SPDelim -XDRFextend -MarkXDRF"
 svfAAs="-wpa -fspta"
 
@@ -40,29 +41,33 @@ opt -S \
     -internalize -internalize-public-api-list "main" -adce -globaldce\
     $targetFile -o .internal_temp1~
 
-opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-      $llvmAAs $xdrfAs -aalevel MayAlias -nousechain -trace 1 $@\
-      .internal_temp1~ -o .internal_temp2~
+cp .internal_temp1~ .internal_temp2~
 
-opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-      $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias -nousechain -trace 2 $@\
-      .internal_temp2~ -o .internal_temp1~
+opt -S -load $FlowSensitiveSo -load $MarkXDRFRegionsSo\
+    $llvmAAs $xdrfAs -aalevel MayAlias -nousechain -trace 1 $@\
+    .internal_temp1~ -o .internal_temp2~
 
-opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-      $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias -trace 3 $@\
-      .internal_temp1~ -o .internal_temp2~
+opt -S -load $FlowSensitiveSo -load $MarkXDRFRegionsSo\
+    $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias -nousechain -trace 2 $@\
+    .internal_temp2~ -o .internal_temp1~
 
-opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-      $llvmAAs $xdrfAs -aalevel MustAlias -nousechain -trace 4 $@\
-      .internal_temp2~ -o .internal_temp1~
+opt -S -load $FlowSensitiveSo -load $MarkXDRFRegionsSo\
+    $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias -trace 3 $@\
+    .internal_temp1~ -o .internal_temp2~
 
-opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-      $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -nousechain -trace 5 $@\
-      .internal_temp1~ -o .internal_temp2~
+opt -S  -load $FlowSensitiveSo -load $MarkXDRFRegionsSo\
+    $llvmAAs $xdrfAs -aalevel MustAlias -nousechain -trace 4 $@\
+    .internal_temp2~ -o .internal_temp1~
 
-opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-      $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -trace 6 $@\
-      .internal_temp2~ -o .internal_temp1~
+opt -S  -load $FlowSensitiveSo -load $MarkXDRFRegionsSo\
+    $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -nousechain -trace 5 $@\
+    .internal_temp1~ -o .internal_temp2~
+
+opt -S -load $FlowSensitiveSo -load $MarkXDRFRegionsSo\
+    $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -trace 6 $@\
+    .internal_temp2~ -o .internal_temp1~
+
+cp .internal_temp2~ .internal_temp1~
 
 opt -S \
     -load $MarkRMSRegionsSo -mark-rms .internal_temp1~ $outputFile

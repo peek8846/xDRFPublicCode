@@ -17,6 +17,7 @@
 #include "UseChainAliasing.cpp"
 // #include "WPA/FlowSensitive.h"
 // #include "MemoryModel/PointerAnalysis.h"
+#include "../SVF-master/include/WPA/WPAPass.h"
 
 #define LIBRARYNAME "AliasCombiner(class)"
 
@@ -233,6 +234,14 @@ public:
                         LIGHT_PRINT("Testing with LLVM AAs\n");
                         AliasResult res = getAAResultsForFun(parent)->alias(comparable.first,comparable.second);
                         LIGHT_PRINT("Got " << res << "\n");
+                        
+                        if (WPAPass *svf = callingPass->getAnalysisIfAvailable<WPAPass>()) {
+                            LIGHT_PRINT("Testing with SVF AAs\n");
+                            AliasResult svfres = svf->alias(comparable.first,comparable.second);
+                            if (svfres == NoAlias)
+                                res = NoAlias;
+                            LIGHT_PRINT("Got " << svfres << "\n");
+                        }
                         
                         //If we get "mayalias" then use the usechainaliasing instead
                         if (useUseChainAliasing) {
