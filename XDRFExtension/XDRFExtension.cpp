@@ -71,6 +71,7 @@
 #include "../SynchPointDelim/SynchPoint.hpp"
 #include "../PointerAliasing/AliasCombiner.cpp"
 //#include "../ThreadDependantAnalysis/ThreadDependance.cpp"
+#include "../SVF-master/include/WPA/WPAPass.h"
 
 #define LIBRARYNAME "XDRFExtension"
 
@@ -260,6 +261,7 @@ namespace {
             AU.addRequired<SynchPointDelim>();
             AU.addRequired<ThreadDependence>();
             AU.addRequired<ScalarEvolutionWrapperPass>();
+            AU.addUsedIfAvailable<WPAPass>();
             AU.setPreservesAll();
         }
       
