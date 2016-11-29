@@ -17,7 +17,7 @@ shift
 
 echo "Checking..."
 
-opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose $@ $targetFile
+opt -load $VerifyXDRFSo -verify-xdrf -debug-only=VerifyXDRF-output $@ $targetFile
 
 # echo "Checking optimistic"
 # opt -load $VerifyXDRFSo -verify-xdrf -debug-only=verify-xdrf -debug-only=verify-xdrf-verbose -trace=1 $@ $targetFile
