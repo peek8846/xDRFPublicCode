@@ -14,9 +14,9 @@ ThreadDependanceSo="$XDRF_BUILD/ThreadDependantAnalysis/libThreadDependantAnalys
 #     exit 1
 # fi
 
-llvmAAs="-scalar-evolution -basicaa -globals-aa -thread-dependence"
-xdrfAs="-thread-dependence -SPDelim -XDRFextend -MarkXDRF"
+llvmAAs="-scalar-evolution -basicaa -globals-aa -tbaa -scev-aa"
 svfAAs="-wpa -fspta"
+xdrfAs="-thread-dependence -SPDelim -XDRFextend -MarkXDRF"
 
 #AAs="-wpa -fspta -scalar-evolution -basicaa -globals-aa"
 #AAs="-basicaa -globals-aa"
@@ -29,7 +29,7 @@ fi
 targetFile=$1
 
 if [[ $# > 1 ]] ; then
-    outputFile="-o $2"
+    outputFile="$2"
     shift
 else
     outputFile=""
@@ -37,59 +37,62 @@ fi
 shift
 
 
-# opt -S \
-#     -internalize -internalize-public-api-list "main" -adce -globaldce\
-#     $targetFile -o .internal_temp1~
+TMPLL=$(mktemp -t xDRF-internal.XXXXXXXXXX)
+if [ $? -ne 0 ]; then
+    exit 1
+fi
 
-# opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-#       $llvmAAs $xdrfAs -aalevel MayAlias -nousechain -trace 1 $@\
-#       .internal_temp1~ -o .internal_temp2~
+CALL_OPT() {
+    # This function will perform a call to "$OPT -S" with the given
+    # parameters to the function. It will use $TMPLL as input,
+    # internally save the output to another file and then move
+    # the output to $TMPLL for easy chaining.
 
-# opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-#       $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias -nousechain -trace 2 $@\
-#       .internal_temp2~ -o .internal_temp1~
+    local TMPOUT=$(mktemp -t xDRF-internal.XXXXXXXXXX)
+    if [ $? -ne 0 ]; then
+        rm -f "$TMPLL"
+        exit 1
+    fi
 
-# opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-#       $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias -trace 3 $@\
-#       .internal_temp1~ -o .internal_temp2~
+    echo "OPT ARGS:" "$@"
+    "$OPT" -S "$@" "$TMPLL" -o "$TMPOUT"
+    mv "$TMPOUT" "$TMPLL"
+}
 
-# opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-#       $llvmAAs $xdrfAs -aalevel MustAlias -nousechain -trace 4 $@\
-#       .internal_temp2~ -o .internal_temp1~
+CALL_OPT_XDRF() {
+    # Convenience for loading relevant passes
+    CALL_OPT -load "$MarkXDRFRegionsSo" -load "$FlowSensitiveSo" "$@"
+}
 
-# opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-#       $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -nousechain -trace 5 $@\
-#       .internal_temp1~ -o .internal_temp2~
+# Copy to temporary file
+cp "$targetFile" "$TMPLL"
 
-# opt -S -load $MarkXDRFRegionsSo -load $FlowSensitiveSo\
-#       $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -trace 6 $@\
-#       .internal_temp2~ -o .internal_temp1~
+# Run the initial passes
+CALL_OPT -internalize -internalize-public-api-list "main" -adce -globaldce
 
-$OPT -S \
-    -internalize -internalize-public-api-list "main" -adce -globaldce \
-    $targetFile -o internal_internalize-dce~
+# Standard approach
+CALL_OPT_XDRF $llvmAAs         $xdrfAs -aalevel MayAlias  -nousechain -trace 1 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias  -nousechain -trace 2 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias              -trace 3 "$@"
+CALL_OPT_XDRF $llvmAAs         $xdrfAs -aalevel MustAlias -nousechain -trace 4 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -nousechain -trace 5 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias             -trace 6 "$@"
 
-$OPT -S -load "$MarkXDRFRegionsSo" -load "$FlowSensitiveSo" \
-    $AAs -SPDelim -XDRFextend -aalevel MustAlias -MarkXDRF -trace 1 $@ \
-    internal_internalize-dce~ -o internal_trace1~
+# CRA appraoch
+CALL_OPT_XDRF $llvmAAs         $xdrfAs -aalevel MayAlias  -nousechain -ndrfconflict -trace  7 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias  -nousechain -ndrfconflict -trace  8 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MayAlias              -ndrfconflict -trace  9 "$@"
+CALL_OPT_XDRF $llvmAAs         $xdrfAs -aalevel MustAlias -nousechain -ndrfconflict -trace 10 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias -nousechain -ndrfconflict -trace 11 "$@"
+CALL_OPT_XDRF $llvmAAs $svfAAs $xdrfAs -aalevel MustAlias             -ndrfconflict -trace 12 "$@"
 
-$OPT -S -load "$MarkXDRFRegionsSo" -load "$FlowSensitiveSo" \
-    $AAs -SPDelim -XDRFextend -aalevel MayAlias -MarkXDRF -trace 2 $@ \
-    internal_trace1~ -o internal_trace2~
+# RMS marking
+CALL_OPT -load "$MarkRMSRegionsSo" -mark-rms
 
-$OPT -S -load "$MarkXDRFRegionsSo" -load "$FlowSensitiveSo" \
-    $AAs -SPDelim -XDRFextend -aalevel MustAlias -ndrfconflict -MarkXDRF -trace 3 $@ \
-    internal_trace2~ -o internal_trace3~
-
-$OPT -S -load "$MarkXDRFRegionsSo" -load "$FlowSensitiveSo" \
-    $AAs -SPDelim -XDRFextend -aalevel MayAlias -ndrfconflict -MarkXDRF -trace 4 $@ \
-    internal_trace3~ -o internal_trace4~
-
-# opt -S \
-#     -load $MarkRMSRegionsSo -mark-rms .internal_temp5~ $outputFile
-
-$OPT -S -load "$MarkRMSRegionsSo" \
-    -mark-rms \
-    internal_trace4~ $outputFile
-
-rm -f internal_internalize-dce~ internal_trace1~ internal_trace2~ internal_trace3~ internal_trace4~
+# Move temporary file to output
+if [ -n "$outputFile" ] ; then
+    cp --no-preserve=mode "$TMPLL" "$outputFile"
+else
+    cat "$TMPLL"
+fi
+rm -f "$TMPLL"
