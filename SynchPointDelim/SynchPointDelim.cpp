@@ -74,6 +74,7 @@
 //#include "../PointerAliasing/UseChainAliasing.cpp"
 #include "../PointerAliasing/AliasCombiner.cpp"
 //#include "../ThreadDependantAnalysis/ThreadDependance.cpp"
+#include "../SVF-master/include/WPA/WPAPass.h"
 
 #define LIBRARYNAME "SynchPointDelim"
 
@@ -197,6 +198,7 @@ namespace {
             AU.addRequired<ThreadDependence>();
             AU.addRequired<TargetLibraryInfoWrapperPass>();
             AU.addRequired<ScalarEvolutionWrapperPass>();
+            AU.addUsedIfAvailable<WPAPass>();
             AU.setPreservesAll();
         }
     

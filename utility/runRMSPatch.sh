@@ -7,6 +7,10 @@ if [[ $# < 1 ]] ; then
     exit 1
 fi
 
+cp $1 $2
+
+exit
+
 targetFile=$1
 
 
@@ -18,5 +22,4 @@ else
 fi
 shift
 
-
-opt -S -load $PathRMSFunctionsSo -patch-rms $targetFile $outputFile $@
+opt -S -load $PathRMSFunctionsSo -patch-rms $targetFile $outputFile
