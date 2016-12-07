@@ -62,7 +62,7 @@ CALL_OPT() {
 
 CALL_OPT_XDRF() {
     # Convenience for loading relevant passes
-    CALL_OPT -load "$MarkXDRFRegionsSo" -load "$FlowSensitiveSo" "$@"
+    CALL_OPT -load "$FlowSensitiveSo" -load "$MarkXDRFRegionsSo" "$@"
 }
 
 # Copy to temporary file
