@@ -11,7 +11,7 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include <list>
 
-#include "../ThreadDependantAnalysis/ThreadDependence.cpp"
+#include "../ThreadDependence/ThreadDependence.cpp"
 
 // // #include "llvm/Analysis/ScalarEvolution.h"
 // #include "llvm/Analysis/ScalarEvolutionExpressions.h"
