@@ -304,9 +304,9 @@ namespace {
             // CRA: Print number of conflicts and add them to the nDRF set
             if (conflictNDRF) {
                 errs() << "CRA: Number of resolved conflicts (new nDRFs): " << resolvedNDRFs.size() << "\n";
-                for (pair<Instruction*, nDRFRegion*> region : resolvedNDRFs) {
-                    nDRFRegions.insert(region.second);
-                }
+                // for (pair<Instruction*, nDRFRegion*> region : resolvedNDRFs) {
+                //     nDRFRegions.insert(region.second);
+                // }
             }
             setupRelatedXDRFs();
             printInfo();

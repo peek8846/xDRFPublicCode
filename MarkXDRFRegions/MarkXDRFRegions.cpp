@@ -37,14 +37,15 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Value.h"
 // #include "llvm/IR/Intrinsics.h"
-// #include "llvm/IR/Metadata.h"
+//#include "llvm/IR/Metadata.h"
 // #include "llvm/IR/CFG.h"
-// #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/DerivedTypes.h"
 // #include "llvm/IR/Dominators.h"
 // #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Constants.h"
 // #include "llvm/IR/Attributes.h"
 #include "llvm/IR/NoFolder.h"
+#include "llvm/IR/InlineAsm.h"
 
 // #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/CFG.h"
@@ -142,6 +143,13 @@ namespace {
                     createDummyCall(endNDRF,inst,false,TRACE_NUMBER);
                 }
 	    }
+
+            // CRA
+            for (pair<Instruction*, nDRFRegion*> region : xdrfextended.resolvedNDRFs) {
+                Instruction *inst = region.first;
+                attachMetadata(inst, "resndrf"+to_string(TRACE_NUMBER), "");
+                //insertInlineAsmResNdrf(inst, TRACE_NUMBER);
+            }
 
             for (Function * fun : entrypoints) {
                 VERBOSE_PRINT("Marking entry/exit xDRF regions in " << fun->getName() << "\n");
@@ -263,6 +271,46 @@ namespace {
                 markCall->insertBefore(insertBef);
             else
                 markCall->insertAfter(insertBef);
+        }
+
+        void attachMetadata(Instruction* inst, std::string mdtype, std::string str) {
+            // attach pragma as metadata
+            unsigned mk = inst->getContext().getMDKindID(mdtype);
+            MDString *S = MDString::get(inst->getContext(),StringRef(str));
+            ArrayRef<Metadata*> MDarr(S);
+            MDNode* n = MDNode::get(inst->getContext(), MDarr);
+            inst->setMetadata(mk, n);
+        }
+
+        void insertInlineAsmResNdrf(Instruction* I, int trace) {
+            // Thank you NerdPirate
+            // http://stackoverflow.com/questions/27234218/in-llvm-how-do-i-reflect-metadata-in-the-assembly-file
+
+            for (int i = 0; i <= 1; ++i) {
+                // 0: before, 1: after
+
+                std::vector<llvm::Type *> AsmArgTypes = {};
+                FunctionType *AsmFTy = FunctionType::get(Type::getVoidTy(I->getContext()), AsmArgTypes, false);
+                InlineAsm *IA = InlineAsm::get(AsmFTy,
+                                               //"movl\t$$"+ to_string(trace) +", %edi\n\t"
+                                               //"xorl\t%eax, %eax\n\t"
+                                               //"movl\t$$0, %eax\n\t"
+                                               //"callq\t" + (i == 0 ? "begin_NDRF" : "end_NDRF"),
+                                               ".ascii\t" + (i == 0 ? string("\"begin_resndrf ") : string("\"end_resndrf ")) + to_string(trace) + "\"",
+                                               //"~{edi},~{eax},~{dirflag},~{fpsr},~{flags}",
+                                               //"~{edi},~{eax},~{flags}",
+                                               "~{edi}",
+                                               //"~{edi},~{eax}",
+                                               /*hasSideEffects*/ true,
+                                               /*isAlignStack*/ false,
+                                               InlineAsm::AD_ATT);
+                Instruction *newInst = CallInst::Create(IA);
+                if (i == 0) {
+                    newInst->insertBefore(I);
+                } else {
+                    newInst->insertAfter(I);
+                }
+            }
         }
     };
 }
