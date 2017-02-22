@@ -792,6 +792,9 @@ namespace {
             //Handle special cases, signals and waits are never xDRF
             if (regionToExtend->receivesSignal || regionToExtend->sendsSignal) {
                 regionToExtend->enclave=false;
+                // The returned sets must be cleared to prevent crosschecks by callers across the non-enclave nDRF.
+                toCompareAgainst.clear();
+                followingRegions.clear();
                 return extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);
             }
             
