@@ -1,5 +1,9 @@
 #!/bin/bash
 
+GET_DATE() {
+    date -u -Ins
+}
+
 OPT="$LLVM_3_8_0_BIN/opt"
 
 SynchPointDelimSo="$XDRF_BUILD/SynchPointDelim/libSynchPointDelim.so"
@@ -38,8 +42,11 @@ fi
 shift
 
 
+echo "Start marking procedure: $(GET_DATE)"
+
 TMPLL=$(mktemp -t xDRF-internal.XXXXXXXXXX)
 if [ $? -ne 0 ]; then
+    echo "Failed to make temporary input file."
     exit 1
 fi
 
@@ -52,11 +59,14 @@ CALL_OPT() {
     local TMPOUT=$(mktemp -t xDRF-internal.XXXXXXXXXX)
     if [ $? -ne 0 ]; then
         rm -f "$TMPLL"
+        echo "Failed to make temporary output file."
         exit 1
     fi
 
     echo "OPT ARGS:" "$@"
+    echo "OPT START: $(GET_DATE)"
     "$OPT" -S "$@" "$TMPLL" -o "$TMPOUT"
+    echo "OPT STOP: $(GET_DATE)"
     mv "$TMPOUT" "$TMPLL"
 }
 
@@ -105,3 +115,5 @@ else
     cat "$TMPLL"
 fi
 rm -f "$TMPLL"
+
+echo "Stop marking procedure: $(GET_DATE)"
