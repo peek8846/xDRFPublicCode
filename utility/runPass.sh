@@ -18,10 +18,12 @@ ThreadDependanceSo="$XDRF_BUILD/ThreadDependence/libThreadDependence.so"
 #     exit 1
 # fi
 
+#debugPrints="--debug-only=SynchPointDelim-debug --debug-only=SynchPointDelim-light --debug-only=SynchPointDelim-verbose --debug-only=XDRFExtension-verbose"
+
 llvmAAs="-scalar-evolution -basicaa -globals-aa -tbaa -scev-aa"
 #llvmAAs="-disable-basicaa"
 svfAAs="-wpa -fspta"
-xdrfAs="-thread-dependence -SPDelim -XDRFextend -MarkXDRF"
+xdrfAs="-thread-dependence -SPDelim -XDRFextend -MarkXDRF $debugPrints"
 
 #AAs="-wpa -fspta -scalar-evolution -basicaa -globals-aa"
 #AAs="-basicaa -globals-aa"
