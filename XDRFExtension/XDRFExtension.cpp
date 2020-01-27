@@ -761,6 +761,14 @@ namespace {
                 return make_pair(toCompareAgainst,followingRegions);
 
             VERBOSE_PRINT("Handling region " << regionToExtend->ID << "\n");
+            // VERBOSE_PRINT("  starting in BBs:\n");
+            // for (Instruction *inst: regionToExtend->beginsAt)
+            //     VERBOSE_PRINT("    " << inst->getParent()->getName() << ", " << inst->getFunction()->getName() << "\n");
+            // VERBOSE_PRINT("  ending in BBs:\n");
+            // for (Instruction *inst: regionToExtend->endsAt)
+            //     VERBOSE_PRINT("    " << inst->getParent()->getName() << ", " << inst->getFunction()->getName() << "\n");
+            // VERBOSE_PRINT("  containing "<< regionToExtend->containedInstructions.size() <<"\n");
+            // VERBOSE_PRINT("  with properties: receivesSignal - " << regionToExtend->receivesSignal << ", sendsSignal - " << regionToExtend->sendsSignal << "\n");
 
             //Handles recursive cases
             extendDRFRegionDynamic[regionToExtend]=make_pair(toCompareAgainst,followingRegions);

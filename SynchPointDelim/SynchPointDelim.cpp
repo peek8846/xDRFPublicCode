@@ -1581,6 +1581,8 @@ namespace {
                     if (currState.nextPoint->critRegion != NULL) {
                         //DISABLED, "critRegion" structure is broken, and we do not want to merge regardless
                         if (false && currState.nextPoint->critRegion != critRegion) {
+                        //if (/*false &&*/ currState.nextPoint->critRegion != critRegion) {
+                            //PRINTSTREAM << "WARNING: CR Merge, this may not work correcetly due to problems with the critRegion structure.\n";
                             critRegion->mergeWith(currState.nextPoint->critRegion);
                             criticalRegions.erase(critRegion);
                             //LIGHT_PRINT("Replacing " << critRegion->ID << " with " << currState.nextPoint->critRegion->ID << "\n");
