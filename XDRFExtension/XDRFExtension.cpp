@@ -741,7 +741,11 @@ namespace {
                 return false;
             }
             
-            return aacombined->MustConflict(X,Y);
+            if (!(aacombined->MustConflict(X,Y))) {
+                return false;
+            }
+
+            return true;
         }
         
         //Returns a pair:
