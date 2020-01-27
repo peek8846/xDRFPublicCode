@@ -60,6 +60,7 @@
 // #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 // #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+//#include "llvm/Analysis/DependenceAnalysis.h" // LDA
 
 // #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 // #include "llvm/Transforms/Utils/Cloning.h"
@@ -273,6 +274,7 @@ namespace {
             AU.addRequired<SynchPointDelim>();
             AU.addRequired<ThreadDependence>();
             AU.addRequired<ScalarEvolutionWrapperPass>();
+            //AU.addRequired<DependenceAnalysis>(); // LDA
             AU.addUsedIfAvailable<WPAPass>();
             AU.setPreservesAll();
         }
@@ -744,6 +746,38 @@ namespace {
             if (!(aacombined->MustConflict(X,Y))) {
                 return false;
             }
+
+            // LDA
+            // PRINT << "conflict - ";
+            // if (X->getFunction() == Y->getFunction()) {
+            //     PRINTSTREAM << "shared function\n";
+
+            //     DependenceAnalysis *DA = &getAnalysis<DependenceAnalysis>(*(X->getFunction()));
+
+            //     PRINT << "da: ";
+            //     PRINTSTREAM << (X==Y ? "=== " : "xxx ");
+            //     if (X==Y) {
+            //         PRINTSTREAM << ">> "
+            //                     << X->getFunction()->getName() << " :: "
+            //                     << X->getParent()->getName() << " :: ";
+            //         X->print(PRINTSTREAM);
+            //         PRINTSTREAM << " << ";
+            //     }
+            //     if (auto D = DA->depends(X, Y, true)) {
+            //         D->dump(PRINTSTREAM);
+            //         for (unsigned Level = 1; Level <= D->getLevels(); Level++) {
+            //             if (D->isSplitable(Level)) {
+            //                 PRINT << "da: split level = " << Level
+            //                       << ", iteration = " << *DA->getSplitIteration(*D, Level)
+            //                       << "!\n";
+            //             }
+            //         }
+            //     } else {
+            //         PRINTSTREAM << "none!\n";
+            //     }
+            // } else {
+            //     PRINTSTREAM << "different functions\n";
+            // }
 
             return true;
         }
